@@ -279,6 +279,18 @@ veg_plots_sf <- dp$vst_perplotperyear %>%
 veg_plots_sf
 plot(veg_plots_sf)
 
+# data from https://data.neonscience.org/data-products/DP1.10098.001
+dp <- loadByProduct(site = "GRSM", dpID = "DP1.10098.001", check.size = FALSE)
+
+# Get one point per vegetation plot (plot centroid)
+veg_plots_sf <- dp$vst_perplotperyear %>%
+  distinct(plotID, decimalLongitude, decimalLatitude) %>%
+  filter(!is.na(decimalLongitude), !is.na(decimalLatitude)) %>%
+  st_as_sf(coords = c("decimalLongitude", "decimalLatitude"), crs = 4326)
+
+veg_plots_sf
+plot(veg_plots_sf)
+
 p_veg = ggplot() +
   geom_sf(data = veg_plots_sf, color = "forestgreen", fill = NA, size = 2, stroke = 0.6) +
   theme_minimal() +
