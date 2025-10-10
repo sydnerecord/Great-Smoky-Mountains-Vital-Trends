@@ -1,5 +1,7 @@
 
 library(tidyverse)
+library(RColorBrewer)
+library(readxl)
 
 theme_plot <- function(legend = TRUE) {
   ggplot2::theme(
@@ -98,13 +100,12 @@ ggplot(streams_enough_years %>% filter(EPT_rich > 0),
   geom_line(linewidth = 1) +
   geom_point(size = 2) +
   scale_color_manual(values = stream_palette, name = "Stream") +   # <-- only ONE color scale
-  scale_y_log10(limits = c(10, 100)) +
+  scale_y_log10(limits = c(18, 60)) +
   labs(x = "Year", y = "EPT Richness") +
-  theme_minimal(base_size = 13) +
   geom_hline(yintercept = c(35, 28, 19), color = "grey40", linetype = "dashed", linewidth = 0.8) +
-  annotate("text", x = 1981, y = 37, label = "Excellent",  color = "grey30", size = 4, hjust = 0) +
-  annotate("text", x = 1981, y = 29, label = "Good",       color = "grey30", size = 4, hjust = 0) +
-  annotate("text", x = 1981, y = 20, label = "Good–Fair",  color = "grey30", size = 4, hjust = 0) +
+  annotate("text", x = 1981, y = 37, label = "Excellent?",  color = "grey30", size = 4, hjust = 0) +
+  annotate("text", x = 1981, y = 29, label = "Good?",       color = "grey30", size = 4, hjust = 0) +
+  annotate("text", x = 1981, y = 20, label = "Good–Fair?",  color = "grey30", size = 4, hjust = 0) +
   theme_plot()
 
 
@@ -160,14 +161,95 @@ ept_pct_filtered <- ept_pct_stream_year %>%
 # Plot example: %EPT over time
 ggplot(ept_pct_filtered, aes(x = Year, y = pct_EPT, color = Location, group = Location)) +
   geom_line(linewidth = 1) +
+  scale_color_manual(values = stream_palette, name = "Stream") +   # <-- only ONE color scale
   geom_point(size = 2) +
   labs(
     x = "Year",
-    y = "% EPT (mean across sites)",
+    y = "% EPT Abundance",
     color = "Stream"
   ) +
-  theme_minimal(base_size = 13) +
+  theme_plot() +
   theme(
     legend.position = "right",
     panel.grid.minor = element_blank()
   )
+
+
+
+# NCBI 
+
+ncbi = read_xlsx('/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Aquatics_Macroinverts/NCBI/NCBI_taxa.xlsx')
+ncbi$Genus = word(ncbi$Species, 1, sep = " ")
+unique(ncbi$Genus)
+
+# Get mean NCBI per Genus
+ncbi_genus = ncbi %>%
+  group_by(Genus) %>%
+  summarize(genus_ncbi = mean(NCBI, na.rm = T))
+
+missing_genera <- inverts %>%
+  dplyr::distinct(Genus) %>%
+  dplyr::anti_join(ncbi_genus, by = "Genus")
+
+#Fraction missing genera
+nrow(missing_genera) / nrow(inverts %>% distinct(Genus)) #57%
+
+inv_join <- inverts %>%
+  dplyr::left_join(ncbi_genus, by = "Genus")
+
+ncbi_site_year <- inv_join %>%
+  dplyr::group_by(Location, Site, Year) %>%
+  dplyr::summarize(
+    NCBI = sum(genus_ncbi * Count, na.rm = TRUE) /
+      sum(Count[!is.na(genus_ncbi)], na.rm = TRUE),
+    n_genera_used    = dplyr::n_distinct(Genus[!is.na(genus_ncbi)]),
+    counts_used      = sum(Count[!is.na(genus_ncbi)], na.rm = TRUE),
+    counts_total     = sum(Count, na.rm = TRUE),
+    prop_counts_used = counts_used / counts_total,
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(Location, Site, Year)
+
+min_years <- 5  # set your minimum number of years
+
+ncbi_stream_year <- ncbi_site_year %>%
+  dplyr::group_by(Location, Year) %>%
+  dplyr::summarize(
+    NCBI_mean = mean(NCBI, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>%
+  dplyr::mutate(n_years = dplyr::n_distinct(Year)) %>%
+  dplyr::filter(n_years >= min_years) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(Location, Year)
+
+
+ref_lines <- data.frame(
+  y = c(4.18, 5.09, 5.91, 7.05),
+  label = c("Excellent", "Good", "Good–Fair", "Poor")
+)
+
+x_left <- min(ncbi_stream_year$Year, na.rm = TRUE)
+
+p <- ggplot(ncbi_stream_year, aes(x = Year, y = NCBI_mean, color = Location, group = Location)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_y_continuous(limits = c(1, 5.3)) +
+  scale_color_manual(values = stream_palette, name = "Stream") +
+  labs(x = "Year", y = "Mean NCBI", color = "Stream") +
+  theme_plot() +
+  theme(legend.position = "right", panel.grid.minor = element_blank()) +
+  geom_hline(
+    data = ref_lines,
+    aes(yintercept = y),
+    color = "grey40", linetype = "dashed", linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+  geom_text(
+    data = ref_lines,
+    aes(x = x_left, y = y + 0.1, label = label),
+    color = "grey30", size = 4, hjust = 0,
+    inherit.aes = FALSE
+  )
+
+p
