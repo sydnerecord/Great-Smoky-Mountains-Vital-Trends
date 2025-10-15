@@ -1,15 +1,20 @@
 ---
-title: "GRSM_Macroinverts_EPT_NCBI"
+title: "GRSM Macroinverts Stream Indices - EPT & NCBI"
 author: "John Grady"
 date: "2025-10-14"
 output: html_document
 ---
+Macroinvertebrates in GRSM - EPT & NCBI
+Insect orders Ephemeroptera (mayflies), Plecoptera (stoneflies) and Trichoptera (caddisflies) are indicators of higher stream quality. 
+Total EPT richness (number of taxa) or abundance weighted indices like NCBI can be used to evaulate stream quality
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE,
                       fig.width=10, fig.height=6, dpi=200, out.width="100%")
 
 ```
+
+First load libraries and plotting code
 ```{r}
 library(tidyverse)
 library(RColorBrewer)
@@ -37,7 +42,7 @@ theme_plot <- function(legend = TRUE) {
   )
 }
 ```
-
+Add data from directory
 ```{r}
 # Base directory (adjust as needed)
 base_dir <- "/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine"
@@ -61,7 +66,7 @@ inverts$Genus    <- stringr::word(inverts$Lab_Scientific_Name, 1, sep = " ")
 inverts$Year     <- as.numeric(stringr::word(inverts$Start_Date, 1, sep = "-"))
 
 ```
-
+To get EPT per stream, first get EPT per site, then average per stream
 ```{r}
 ept_site_year <- inverts %>%
   group_by(Location, Site, Year) %>%
@@ -83,7 +88,9 @@ ept_stream_year <- ept_site_year %>%
     n_sites  = dplyr::n_distinct(Site),
     .groups  = "drop"
   )
-
+```
+Specify minimum number of sample years to consider
+```{r}
 n_years_min <- 5
 streams_enough_years <- ept_stream_year %>%
   group_by(Location) %>%
@@ -92,8 +99,11 @@ streams_enough_years <- ept_stream_year %>%
 
 n_streams      <- length(unique(streams_enough_years$Location))
 stream_palette <- viridisLite::turbo(n_streams)
-
 ```
+
+Plot EPT - Total number of genera from EPT per stream over time
+Plotted threshold for quality are given in reference for unspecified EPT "taxa" in NC mountains
+Here we use genera, which will produce a lower value than species. Threshold may not be accurate.
 ```{r}
 ggplot(
   streams_enough_years %>% filter(EPT_rich > 0),
@@ -111,8 +121,12 @@ ggplot(
   theme_plot()
 
 ```
+
+NCBI is the North Carolina Biotic Index that includes abundance data to give a biotic index for stream quality. 
+We add a file on species-level NCBI values to our GRSM stream dataset. We average species to get a genus level NCBI. We average genera to get a site level value. Then we average sites per stream to get a stream level NCBI value. Thresholds for stream quality are shown 
+
+The formula is NCBI = (NCBI_value_per_taxa X taxa_abundance)/total_invert_abundance)
 ```{r}
-# If your NCBI sheet uses a different column than `Species`, change here:
 ncbi$Genus <- stringr::word(ncbi$Species, 1, sep = " ")
 
 ncbi_genus <- ncbi %>%
@@ -122,36 +136,37 @@ ncbi_genus <- ncbi %>%
 inv_join <- inverts %>%
   dplyr::left_join(ncbi_genus, by = "Genus")
 
+# Join totals so you can compute coverage
+totals <- inv_join %>%
+  dplyr::group_by(Location, Site, Year) %>%
+  dplyr::summarize(counts_total = sum(Count, na.rm = TRUE), .groups = "drop")
+
+# Scored-only NCBI
 ncbi_site_year <- inv_join %>%
+  dplyr::filter(!is.na(genus_ncbi)) %>%
   dplyr::group_by(Location, Site, Year) %>%
   dplyr::summarize(
-    NCBI = {
-      num <- sum(genus_ncbi * Count, na.rm = TRUE)   # scored taxa contribute
-      den <- sum(Count, na.rm = TRUE)                # total individuals (scored + unscored)
-      ifelse(den > 0, num / den, NA_real_)
-    },
-    n_genera_used    = dplyr::n_distinct(Genus[!is.na(genus_ncbi)]),
-    counts_used      = sum(Count[!is.na(genus_ncbi)], na.rm = TRUE),
-    counts_total     = sum(Count, na.rm = TRUE),
-    prop_counts_used = ifelse(counts_total > 0, counts_used / counts_total, NA_real_),
+    num           = sum(genus_ncbi * Count, na.rm = TRUE),
+    counts_used   = sum(Count, na.rm = TRUE),
+    n_genera_used = dplyr::n_distinct(Genus),
     .groups = "drop"
   ) %>%
-  dplyr::arrange(Location, Site, Year)
+  dplyr::left_join(totals, by = c("Location","Site","Year")) %>%
+  dplyr::mutate(
+    NCBI = ifelse(counts_used > 0, num / counts_used, NA_real_),
+    prop_counts_used = ifelse(counts_total > 0, counts_used / counts_total, NA_real_)
+  )
 
-min_years <- 5
+# Stream-year mean (+ quality summaries)
 ncbi_stream_year <- ncbi_site_year %>%
-  dplyr::group_by(Location, Year) %>%
-  dplyr::summarize(
-    NCBI_mean = mean(NCBI, na.rm = TRUE),
-    .groups   = "drop_last"
-  ) %>%
-  dplyr::mutate(n_years = dplyr::n_distinct(Year)) %>%
-  dplyr::filter(n_years >= min_years) %>%
-  dplyr::ungroup() %>%
-  dplyr::arrange(Location, Year)
+  group_by(Location, Year) %>%
+  summarize(NCBI_mean = mean(NCBI, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Location) %>%
+  filter(n_distinct(Year) >= n_years_min) %>%
+  ungroup()
 
-```
-```{r}
+
+
 ref_lines <- data.frame(
   y     = c(4.18, 5.09, 5.91, 7.05),
   label = c("Excellent", "Good", "Good–Fair", "Poor")
