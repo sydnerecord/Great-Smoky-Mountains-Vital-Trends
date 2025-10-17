@@ -508,20 +508,6 @@ plot_z_heatmap <- function(df, vars, title=NULL){
     labs(title=title,subtitle=paste("Z-scores; ref year =",ref_year))
 }
 
-plot_yearly_trend_smooth <- function(df,vars,title=NULL){
-  keep <- vars_present(df,vars)
-  df_long <- df%>%select(cluster_id,Year,all_of(keep))%>%
-    pivot_longer(all_of(keep),names_to="variable",values_to="value")%>%
-    group_by(Year,variable)%>%
-    summarise(med=median(value,na.rm=TRUE),
-              p25=quantile(value,0.25,na.rm=TRUE),
-              p75=quantile(value,0.75,na.rm=TRUE),.groups="drop")
-  ggplot(df_long,aes(Year,med))+
-    geom_ribbon(aes(ymin=p25,ymax=p75),alpha=.2)+
-    geom_smooth(se=FALSE,method="gam",formula=y~s(x,k=6))+
-    facet_wrap(~variable,scales="free_y",ncol=3)+
-    labs(title=title,subtitle="GAM-smoothed medians ± IQR")
-}
 
 #==============================================================
 # 8. Correlations among variables
@@ -549,6 +535,8 @@ as.data.frame(as.table(corr_mat)) %>%
   theme_minimal(base_size=10)+
   theme(axis.text.x=element_text(angle=45,hjust=1))+
   labs(title="Spearman correlations among cluster-year variables",fill="ρ")
+
+
 
 ##############################################################
 # plots
