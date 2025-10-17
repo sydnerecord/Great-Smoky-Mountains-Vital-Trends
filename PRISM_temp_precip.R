@@ -1,4 +1,4 @@
-install.packages("prism")
+
 library(prism)
 library(terra)
 library(httr)
@@ -135,8 +135,6 @@ plot(tmean_annual_mean$tmean_mean_1980)
 
 
 
-library(terra)
-
 # brown → green (for precipitation)
 plot(ppt_annual_mean$ppt_mean_1980,
      col = hcl.colors(20, "Terrain", rev = TRUE),   # earthy brown–green
@@ -146,8 +144,3 @@ plot(ppt_annual_mean$ppt_mean_1980,
 plot(tmean_annual_mean$tmean_mean_1980,
      col = rev(hcl.colors(20, "RdBu")),             # red–blue diverging
      main = "Annual Mean Temperature 1980 (°C)")
-
-# brown → green (for precipitation)
-plot(ppt_annual_mean$ppt_mean_1980,
-     col = hcl.colors(20, "Terrain", rev = TRUE),   # earthy brown–green
-     main = "Annual Precipitation 1980 (mm)")
