@@ -130,7 +130,7 @@ soils_parkwide_sites <- soil_coordinates %>%
             display_name = LOC_NAME,
             lon, lat,
             datum = "WGS84")  # outSR=4326
-
+write_csv()
 noland_sites <- noland_soil_coords %>%
   transmute(dataset = "soils_noland",
             site_id = station_id,
@@ -138,6 +138,9 @@ noland_sites <- noland_soil_coords %>%
             lon = longitude, lat = latitude,
             datum = datum) %>%
   distinct()
+soils_loc_parkwide_noland = bind_rows(soils_parkwide_sites, noland_sites) %>%
+  rename(LOC_NAME = site_id)
+write_csv(soils_loc_parkwide_noland, '/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Soil_Quality/soil_locations_all.csv')  
 
 invert_sites <- invert_locations %>%
   clean_names() %>%
