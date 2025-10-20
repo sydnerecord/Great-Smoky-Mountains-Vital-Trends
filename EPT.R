@@ -79,6 +79,7 @@ ept_site_year <- inverts %>%
     EPT_rich = E_rich + P_rich + T_rich,
     .groups  = "drop"
   )
+write_csv(ept_site_year, '/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Aquatics_Macroinverts/NCBI_EPT/EPT_site_summary.csv')
 
 # Average sites within stream
 ept_stream_year <- ept_site_year %>%
@@ -91,7 +92,7 @@ ept_stream_year <- ept_site_year %>%
     n_sites  = dplyr::n_distinct(Site),       # number of sites contributing
     .groups  = "drop"
   )
-
+write_csv(ept_stream_year, '/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Aquatics_Macroinverts/NCBI_EPT/EPT_summary.csv')
 # ======================================================================
 # Filter to streams with sufficient temporal coverage
 # - n_years_min can be tuned; keeps time-series reasonably comparable
@@ -172,6 +173,10 @@ ncbi_site_year <- inv_join %>%
     prop_counts_used = counts_used / counts_total,   # coverage in abundance space
     .groups = "drop") %>%
   dplyr::arrange(Location, Site, Year)
+ncbi_site_year$Site <- str_squish(ncbi_site_year$Site)
+
+ncbi_site_year 
+write_csv(ncbi_site_year, '/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Aquatics_Macroinverts/NCBI_EPT/NCBI_site_results.csv')
 
 # ----------------------------------------------------------------------
 # Stream-year NCBI
@@ -186,10 +191,11 @@ ncbi_stream_year <- ncbi_site_year %>%
     NCBI_mean = mean(NCBI, na.rm = TRUE),  # equal-weight site means
     .groups   = "drop_last") %>%
   dplyr::mutate(n_years = dplyr::n_distinct(Year)) %>%  # NOTE: within grouped data this will be 1; retained for symmetry
-  dplyr::filter(n_years >= min_years) %>%               # keeps consistency with earlier filters
+  #dplyr::filter(n_years >= min_years) %>%               # keeps consistency with earlier filters
   dplyr::ungroup() %>%
   dplyr::arrange(Location, Year)
 
+write_csv(ncbi_stream_year, '/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Aquatics_Macroinverts/NCBI_EPT/NCBI_results.csv')
 # ----------------------------------------------------------------------
 # Reference lines and labels for NCBI plot
 # - Thresholds: 4.18, 5.09, 5.91, 7.05 (example categories)
