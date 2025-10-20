@@ -26,7 +26,7 @@ theme_plot <- function(legend = TRUE) {
 
 # remove white space around values
 inverts <- inverts %>%
-  mutate(across(everything(), ~ if(is.character(.x)) trimws(.x) else .x))
+  mutate(across(where(is.character), str_squish))
 
 #Add helpful columns
 inverts$Location = word(inverts$LOC_NAME, 1, sep = ",")
@@ -138,15 +138,13 @@ siteyear_spread <- sample_totals %>%
 
 siteyear_spread
 
-
-
 ###### Abundance by Order/Family Trends ###
  
 # ---- params ----
 taxon_col <- "Genus"         # or "Lab_Family", "Genus"
 min_samples_per_year <- 5        # min number of taxon sampled per year
 long_term_min_years  <- 10        # min number of years sampled
-restrict_long_term   <-T     # set TRUE to keep only long-term sites
+restrict_long_term   <- T     # set TRUE to keep only long-term sites
 
 # ---- effort summaries ----
 effort_year <- inverts %>%
