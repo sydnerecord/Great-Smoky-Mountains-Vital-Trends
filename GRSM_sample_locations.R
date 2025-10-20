@@ -43,24 +43,15 @@ soils_loc <- soils %>% pull(LOC_NAME) %>% unique()
 watershed <- st_read('/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Locations/GRSM_WATERSHEDS/GRSM_WATERSHEDS.shp')[2]
 plot(watershed)  # quick base plot check
 
-# Dissolve to a single outline (keeps a clean park border for maps)
-watershed_outline <- watershed |>
-  st_make_valid() |>
-  st_union() |>
-  st_cast("MULTIPOLYGON") |>
-  st_as_sf()
-
-# Quick outline check (base graphics)
-plot(st_geometry(watershed_outline), col = NA, border = "black", lwd = 2, axes = TRUE)
+grsm_border <- st_read('/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Locations/BOUNDARY_LN/BOUNDARY_LN.shp') %>%
+  st_transform(st_crs(watershed))
+plot(grsm_border)
 
 #############################
 # 3) STREAMS (NPS FeatureServer)
 #############################
 # Pull named flowlines directly as GeoJSON (keeps GNIS_NAME)
-streams <- st_read(
-  "https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/GRSM_HYDROLOGY/FeatureServer/0/query?where=1=1&outFields=*&f=geojson",
-  quiet = TRUE
-)
+streams <- st_read('/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Locations/Streams/GRSM_HYDROLOGY.geojson')[3]
 
 # Minimal prep for colorizing by name
 streams_named <- streams %>%
@@ -73,11 +64,11 @@ pal <- viridis(n, option = "turbo")  # wide palette for many names
 # Align CRS just in case
 streams_named <- st_transform(streams_named, st_crs(watershed))
 ggplot() +
-  geom_sf(data = watershed_outline, fill = "grey98", color = "black", linewidth = 0.8) +
-  geom_sf(data = watershed, fill = NA, color = "grey70", linewidth = 0.3) +
+  geom_sf(data = grsm_border, fill = NA, color = "black", linewidth = 1) +
+  geom_sf(data = watershed, fill = NA, color = "grey20", linewidth = 0.5) +
   geom_sf(data = streams_named, aes(color = color_id), linewidth = 0.35, alpha = 0.9) +
   geom_sf_text(data = streams_named, aes(label = GNIS_NAME, color = color_id),
-               size = 1.5, check_overlap = TRUE) +
+               size = 2, check_overlap = TRUE) +
   scale_color_manual(values = pal, guide = "none") +
   coord_sf() +
   labs(title = "GRSM Watersheds + Streams (baseline)") +
