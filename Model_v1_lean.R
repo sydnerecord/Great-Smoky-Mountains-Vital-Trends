@@ -52,7 +52,7 @@ theme_plot <- function(legend = TRUE) {
 #--------------------------------------------------------------
 three_pass_data <- read_xlsx(
   gp("Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary.xlsx"),
-  sheet = "Summary")%>%
+  sheet = "Summary") %>%
   rename(STATION_NAME = Site) %>%
   left_join(
     read_csv(gp("Data/Aquatics_Fish/Three_Pass/Locations/GRSM_THREE_PASS.csv")) %>%
@@ -60,6 +60,7 @@ three_pass_data <- read_xlsx(
       distinct(),
     by = "STATION_NAME") %>%
   rename(LOC_NAME = STATION_NAME)
+write_csv(three_pass_data, gp("Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_loc.csv"))
 
 three_pass_summary <- three_pass_data %>%
   mutate(Year = year(Date)) %>%
