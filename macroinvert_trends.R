@@ -7,7 +7,7 @@ library(viridisLite)   # color options
 library(tidyverse)     # data import (readr), manipulation (dplyr), plotting (ggplot2), strings (stringr)
 library(sf)            # spatial data
 library(lubridate)
-
+library(forcats)
 
 # ======================================================================
 # Plot theme
@@ -48,11 +48,13 @@ inverts <- readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinver
 inverts_original = readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export.csv")) #unmodified
 
 # Spatial layers (consistent format)
-watershed <- sf::st_read(file.path(drive_path, "Maine/Locations/GRSM_WATERSHEDS/GRSM_WATERSHEDS.shp"))[2]
-grsm_border <- sf::st_read(file.path(drive_path, "Maine/Locations/BOUNDARY_LN/BOUNDARY_LN.shp"))[6] %>%
+watershed = st_read(file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"))[2]
+grsm_streams = st_read(file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"))
+
+
+grsm_border <- sf::st_read(file.path(drive_path, "Maine/Spatial/BOUNDARY_LN/BOUNDARY_LN.shp"))[6] %>%
   sf::st_transform(sf::st_crs(watershed))
-streams <- sf::st_read(file.path(drive_path, "Maine/Locations/Streams/GRSM_HYDROLOGY.geojson"))[3] %>%
-  sf::st_transform(sf::st_crs(watershed))
+
 
 # ======================================================================
 # ===============================================================
@@ -84,7 +86,11 @@ dups <- inverts_original %>%
   ungroup() %>%
   arrange(across(everything())) #sets output so that duplicates are next to each other - note if not, its not obvious
 dups #492 rows of duplicates - ie, 246 rows have a duplicate
-dups$Year # most duplicates in 2017
+
+dups %>%
+  count(Year, name = "n_duplicates") %>%
+  arrange(Year)
+
 
 # Inverts with locations
 
@@ -109,6 +115,67 @@ inverts <- inverts %>%
 # ----------------------------------------------------------------------
 # ---------------- Table checks ---------------------------------------
 # ----------------------------------------------------------------------
+# Sampling over the years - unique sample codes per month
+
+time_table_samplecodes <- inverts %>%
+  filter(!is.na(Start_Date), !is.na(Sample_Code)) %>%
+  transmute(
+    Year  = year(Start_Date),
+    Month = factor(month(Start_Date), levels = 1:12, labels = month.abb),
+    Sample_Code
+  ) %>%
+  distinct(Year, Month, Sample_Code) %>%          # one count per unique sample code in a Year–Month
+  count(Year, Month, name = "n_samplecodes") %>%  # totals per Year–Month
+  pivot_wider(
+    names_from  = Month,
+    values_from = n_samplecodes,
+    values_fill = 0
+  ) %>%
+  arrange(Year) %>%
+  relocate(Year, all_of(month.abb))
+
+time_table_samplecodes %>% print(n = 27)
+
+# same but by location name
+time_table_location <- inverts %>%
+  filter(!is.na(Start_Date), !is.na(LOC_NAME)) %>%
+  transmute(
+    Year  = year(Start_Date),
+    Month = factor(month(Start_Date), levels = 1:12, labels = month.abb),
+    LOC_NAME
+  ) %>%
+distinct(Year, Month, LOC_NAME) %>%          # one count per unique sample code in a Year–Month
+  count(Year, Month, name = "n_loc_names") %>%  # totals per Year–Month
+  pivot_wider(
+    names_from  = Month,
+    values_from = n_loc_names,
+    values_fill = 0
+  ) %>%
+  arrange(Year) %>%
+  relocate(Year, all_of(month.abb))
+
+time_table_location%>% print(n = 27)
+
+# by site, month and year
+time_table2 <- inverts %>%
+  dplyr::filter(!is.na(Start_Date)) %>%
+  dplyr::distinct(
+    LOC_NAME,
+    Year  = lubridate::year(Start_Date),
+    Month = lubridate::month(Start_Date, label = TRUE, abbr = TRUE),
+    Sample_Code
+  ) %>%                                  # each Sample_Code counts once within LOC_NAME × Year × Month
+  dplyr::count(LOC_NAME, Year, Month, name = "n_samples") %>%
+  tidyr::pivot_wider(
+    names_from  = Month,                  # creates Jan..Dec columns
+    values_from = n_samples,
+    values_fill = 0
+  ) %>%
+  dplyr::arrange(LOC_NAME, Year) %>%
+  dplyr::relocate(LOC_NAME, Year, dplyr::all_of(month.abb))
+time_table2
+time_table2%>% print(n = 36)
+
 # Multiple samples?
 # Count number of distinct sample codes per site-year
 multisite_samples <- inverts %>%
@@ -122,19 +189,76 @@ multisite_samples <- inverts %>%
   filter(n_samplecodes > 1)
 
 # 
-multisite_samples
+multisite_samples %>% print(n = 11)
 
-multi_date_samples <- inverts %>%
-  group_by(Sample_Code) %>%
-  summarise(
-    n_sites = n_distinct(LOC_NAME),
-    n_years = n_distinct(Year),
-    n_dates = n_distinct(Start_Date),
-    .groups = "drop"
+#Plot by month
+
+inverts %>%
+  mutate(
+    Stream = stringr::word(LOC_NAME, 1, sep = ","),
+    Year   = year(Start_Date)
   ) %>%
-  filter(n_dates > 1 | n_sites > 1 )
+  group_by(Stream) %>%
+  filter(n_distinct(Year) >= 5) %>%              # keep only ≥5 years sampled
+  ungroup() %>%
+  mutate(Month = factor(month(Start_Date, label = TRUE, abbr = TRUE),
+                        levels = month.abb)) %>%
+  ggplot(aes(x = Month, fill = Stream)) +
+  geom_bar(position = "stack") +
+  scale_fill_viridis_d(option = "turbo") +
+  labs(x = "Month", y = "Number of Samples", fill = "Stream",
+       title = "Overall Sampling Seasonality (≥5-Year Streams)") +
+  theme_plot() +
+  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5))
 
-multi_date_samples
+# scatterplot - time of year samples
+inverts %>%
+  mutate(
+    Stream = stringr::word(LOC_NAME, 1, sep = ","),
+    Year   = year(Start_Date),
+    doy    = yday(Start_Date)
+  ) %>%
+  group_by(Stream) %>%
+  filter(n_distinct(Year) >= 5) %>%
+  ungroup() %>%
+  ggplot(aes(x = Year, y = doy, color = Stream)) +
+  geom_point(size = 2, alpha = 0.7) +
+  scale_y_continuous(
+    breaks = c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349),
+    labels = month.abb
+  ) +
+  scale_x_continuous(breaks = seq(1980, 2025, by = 5)) +
+  scale_color_viridis_d(option = "turbo") +
+  labs(x = "Year", y = "Sampling Month", color = "Stream",
+       title = "Sampling Dates by Year (≥5-Year Streams)") +
+  theme_plot() +
+  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5))
+
+
+# scatterplot - time of year samples
+inverts %>%
+  mutate(
+    Stream = stringr::word(LOC_NAME, 1, sep = ","),
+    Year   = year(Start_Date),
+    doy    = yday(Start_Date)
+  ) %>%
+  group_by(Stream) %>%
+  filter(n_distinct(Year) >= 5) %>%
+  ungroup() %>%
+  ggplot(aes(y = Year, x = doy, color = Stream)) +
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_continuous(
+    breaks = c(15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349),
+    labels = month.abb
+  ) +
+  scale_y_continuous(breaks = seq(1980, 2025, by = 5)) +
+  scale_color_viridis_d(option = "turbo") +
+  labs(x = "Sampling Month", y = "Year", color = "Stream",
+       title = "Sampling Dates by Year (≥5-Year Streams)") +
+  theme_plot() +
+  theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5))
+
+
 
 #---- Average in cases of multiple samples per site
 
@@ -188,6 +312,7 @@ inverts_stream <- site_year %>%
     EPT_rich_stream = mean(EPT_rich_site, na.rm = TRUE),
     EPT_abund_stream = mean(EPT_abund_site, na.rm = TRUE),
     ncbi_stream = mean(ncbi_site, na.rm = TRUE),
+    EPT_prop_abun = EPT_abund_stream/ abund_stream,
     n_samples    = n(),  # QC: how many samples contributed
     .groups = "drop"
   ) %>%
@@ -315,8 +440,28 @@ p_ept_abundance <- ggplot(
            hjust = 0, vjust = 0, color = "black")
 p_ept_abundance
 
-# 
+# Relative EPT abundance
+p_rel_ept <- ggplot(
+  inverts_stream %>% 
+    filter(n_years_sampled >= 5, abund_stream > 0),
+  aes(x = Year, y = EPT_prop_abun, color = Stream, group = Stream)) +
+  geom_line() +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm", linetype = "dashed", se = F, show.legend = F, size = 0.5) +
+  scale_y_log10() +
+  scale_x_continuous(
+    breaks = seq(1985, 2025, by = 5),
+    limits = c(1984, 2025)) +
+  labs(x = "Year", y = "Abundance per Stream", color = "Stream") +
+  theme_plot() +
+  ggtitle("EPT Relative Abundance") +
+  scale_color_viridis_d(option = "turbo") +
+  theme( panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+         panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+         legend.position = "right") 
+p_rel_ept
 
+# EPT Richness
 p_ept <- ggplot(
   inverts_stream %>% 
     filter(n_years_sampled >= 5, abund_stream > 0),
@@ -329,7 +474,7 @@ p_ept <- ggplot(
     limits = c(1984, 2025)) +
   labs(x = "Year", y = "EPT", color = "Stream") +
   theme_plot() +
-  ggtitle("EPT") +
+  ggtitle("EPT Richness") +
   scale_color_viridis_d(option = "turbo") +
   theme(
     panel.grid.major = element_blank(),
@@ -374,62 +519,183 @@ p_ncbi <- ggplot(
 p_ncbi
 
 
-#------ Attach geometry for plotting
 
-coords_sf <- inverts %>%
-  st_as_sf(coords = c("LON","LAT"), crs = 4326, remove = FALSE) %>%
-  mutate(stream = str_squish(str_remove(LOC_NAME, ",?\\s*Site\\s*\\w+$"))) %>%
-  group_by(stream) %>%
-  slice_head(n = 1) %>%   # one actual sampled point per stream
+#########################
+# ------Run over summer months ---
+#-------------------------------
 
-inverts_stream_sf <- inverts_stream %>%
-  left_join(coords_sf %>% dplyr::rename(Stream = stream), by = "Stream") %>%
-  sf::st_as_sf()
+# -----------------------------
+# 1) Build month-aware summaries
+# -----------------------------
 
-# https://grsm-nps.opendata.arcgis.com/datasets/60eb34ba0a354554ada335a11b83180f_0/explore?location=35.641900%2C-83.544595%2C9.86
-#https://grsm-nps.opendata.arcgis.com/datasets/60eb34ba0a354554ada335a11b83180f_0/explore?location=35.641900%2C-83.544595%2C9.86
+# Add Month once (ordered Jan..Dec)
+inverts_m <- inverts %>%
+  mutate(
+    Month = factor(month(Start_Date), levels = 1:12, labels = month.abb),
+    Year  = year(Start_Date)
+  )
 
-# Read watershed polygons (index [2] keeps the desired layer per your workflow)
+EPT_ORDERS <- c("Ephemeroptera", "Plecoptera", "Trichoptera")
 
-# 1) Make everything the same CRS as watershed
+# sample level (unique Sample_Code within day)
+sample_level_m <- inverts_m %>%
+  group_by(LOC_NAME, Year, Month, Start_Date, Sample_Code) %>%
+  summarise(
+    abund_sample     = sum(Count, na.rm = TRUE),
+    rich_sample      = n_distinct(Genus, na.rm = TRUE),
+    EPT_rich_sample  = n_distinct(Genus[Lab_Order %in% EPT_ORDERS], na.rm = TRUE),
+    EPT_abund_sample = sum(Count[Lab_Order %in% EPT_ORDERS], na.rm = TRUE),
+    ncbi_sample      = sum(genus_ncbi * Count, na.rm = TRUE) / sum(Count, na.rm = TRUE),
+    .groups = "drop"
+  )
 
-#------ Attach geometry for plotting
+# day level
+site_day_m <- sample_level_m %>%
+  group_by(LOC_NAME, Year, Month, Start_Date) %>%
+  summarise(
+    abund_day     = mean(abund_sample,     na.rm = TRUE),
+    rich_day      = mean(rich_sample,      na.rm = TRUE),
+    EPT_rich_day  = mean(EPT_rich_sample,  na.rm = TRUE),
+    EPT_abund_day = mean(EPT_abund_sample, na.rm = TRUE),
+    ncbi_day      = mean(ncbi_sample,      na.rm = TRUE),
+    n_samples     = n(),
+    .groups = "drop"
+  )
 
-coords_sf <- inverts %>%
-  st_as_sf(coords = c("LON","LAT"), crs = 4326, remove = FALSE) %>%
-  mutate(stream = str_squish(str_remove(LOC_NAME, ",?\\s*Site\\s*\\w+$"))) %>%
-  group_by(stream) %>%
-  slice_head(n = 1) %>%   # one actual sampled point per stream
+# site × year × month
+site_year_month <- site_day_m %>%
+  group_by(LOC_NAME, Year, Month) %>%
+  summarise(
+    abund_site     = mean(abund_day,     na.rm = TRUE),
+    rich_site      = mean(rich_day,      na.rm = TRUE),
+    EPT_rich_site  = mean(EPT_rich_day,  na.rm = TRUE),
+    EPT_abund_site = mean(EPT_abund_day, na.rm = TRUE),
+    ncbi_site      = mean(ncbi_day,      na.rm = TRUE),
+    n_days         = n(),
+    .groups = "drop"
+  )
+
+# stream × year × month
+inverts_stream_m <- site_year_month %>%
+  mutate(Stream = stringr::word(LOC_NAME, 1, sep = ",")) %>%
+  group_by(Stream, Year, Month) %>%
+  summarise(
+    abund_stream      = mean(abund_site,     na.rm = TRUE),
+    rich_stream       = mean(rich_site,      na.rm = TRUE),
+    EPT_rich_stream   = mean(EPT_rich_site,  na.rm = TRUE),
+    EPT_abund_stream  = mean(EPT_abund_site, na.rm = TRUE),
+    ncbi_stream       = mean(ncbi_site,      na.rm = TRUE),
+    EPT_prop_abun     = if_else(abund_stream > 0, EPT_abund_stream / abund_stream, NA_real_),
+    n_sites_agg       = n(),     # how many sites contributed in that month
+    .groups = "drop"
+  ) %>%
+  group_by(Stream, Month) %>%
+  mutate(n_years_sampled = dplyr::n_distinct(Year)) %>%  # total years sampled for this Stream in THIS Month
   ungroup()
 
+# --- Helper function: single wide summer plot ---
+summer_plot <- function(df, yvar, ylab, title, logy = FALSE, ylim = NULL) {
+  
+  df_summer <- df %>%
+    filter(Month %in% c("Jun", "Jul", "Aug")) %>%
+    group_by(Stream, Month) %>%
+    mutate(n_years_sampled = dplyr::n_distinct(Year)) %>%
+    ungroup() %>%
+    filter(n_years_sampled >= 5) %>%
+    mutate(Month = forcats::fct_relevel(Month, "Jun", "Jul", "Aug"))
+  
+  if (isTRUE(logy)) {
+    df_summer <- df_summer %>% filter(.data[[yvar]] > 0)
+  }
+  
+  p <- ggplot(
+    df_summer,
+    aes(x = Year, y = .data[[yvar]], color = Stream, group = Stream)
+  ) +
+    geom_line() +
+    geom_point(size = 2) +
+    geom_smooth(method = "lm", linetype = "dashed", se = FALSE, size = 0.7) +
+    scale_x_continuous(breaks = seq(1980, 2025, by = 10), limits = c(1984, 2025)) +
+    labs(x = "Year", y = ylab, color = "Stream", title = title) +
+    theme_plot() +
+    scale_color_viridis_d(option = "turbo") +
+    facet_wrap(~ Month, ncol = 1, strip.position = "left",
+               labeller = as_labeller(c(Jun = "June", Jul = "July", Aug = "August"))) +
+    theme(
+      strip.text       = element_text(size = 18, face = "bold"),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border     = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      legend.position  = "right"
+    )
+  
+  if (isTRUE(logy)) {
+    p <- p + scale_y_log10()
+  } else if (!is.null(ylim)) {
+    p <- p + scale_y_continuous(limits = ylim)
+  }
+  
+  p + theme(plot.margin = margin(10, 20, 10, 10),
+            aspect.ratio = 0.25)
+}
+
+# --- Define metrics (one plot each) ---
+metrics <- tribble(
+  ~yvar,               ~ylab,                          ~title,                           ~logy,  ~ylim,
+  "rich_stream",       "Genus Richness per Stream",    "Genera Richness — Summer",       TRUE,   NA,
+  "abund_stream",      "Abundance per Stream",         "Stream Abundance — Summer",      TRUE,   NA,
+  "EPT_rich_stream",   "EPT Richness per Stream",      "EPT Richness — Summer",          TRUE,  NA,
+  "EPT_prop_abun",     "EPT Relative Abundance",       "EPT Relative Abundance — Summer",FALSE,  c(0, 1),
+  "ncbi_stream",       "NCBI per Stream",              "NCBI — Summer",                  FALSE,  c(0.5, 4.4)
+)
+
+# --- Generate all plots ---
+summer_plots <- metrics %>%
+  mutate(plot = pmap(list(yvar, ylab, title, logy, ylim),
+                     ~ summer_plot(inverts_stream_m, ..1, ..2, ..3, ..4, ..5)))
+
+# --- Access individual plots ---
+p_richness_summer   <- summer_plots$plot[[1]]
+p_abundance_summer  <- summer_plots$plot[[2]]
+p_ept_rich_summer   <- summer_plots$plot[[3]]
+p_ept_prop_summer   <- summer_plots$plot[[4]]
+p_ncbi_summer       <- summer_plots$plot[[5]]
+
+# --- Display any plot ---
+p_richness_summer
+p_abundance_summer
+p_ept_rich_summer
+p_ept_prop_summer
+p_ncbi_summer
+
+#------ Attach geometry for plotting
+
+coords_sf <- inverts %>%
+  st_as_sf(coords = c("LON","LAT"), crs = 4326, remove = FALSE) %>%
+  mutate(stream = str_squish(str_remove(LOC_NAME, ",?\\s*Site\\s*\\w+$"))) %>%
+  group_by(stream) %>%
+  select(-Year) %>%
+  slice_head(n = 1)  # one actual sampled point per stream
+
 inverts_stream_sf <- inverts_stream %>%
   left_join(coords_sf %>% dplyr::rename(Stream = stream), by = "Stream") %>%
   sf::st_as_sf()
 
-# https://grsm-nps.opendata.arcgis.com/datasets/60eb34ba0a354554ada335a11b83180f_0/explore?location=35.641900%2C-83.544595%2C9.86
-#https://grsm-nps.opendata.arcgis.com/datasets/60eb34ba0a354554ada335a11b83180f_0/explore?location=35.641900%2C-83.544595%2C9.86
-
-# Read watershed polygons (index [2] keeps the desired layer per your workflow)
-
-# 1) Make everything the same CRS as watershed
-
-inverts_stream_sf <- st_transform(inverts_stream_sf, st_crs(watershed))
+inverts_stream_sf <- st_transform(inverts_stream_sf, st_crs(grsm_watershed))
 
 
 # Minimal prep for colorizing by name
-streams_named <- streams %>%
-  filter(!is.na(GNIS_NAME), GNIS_NAME != "") %>%
-  mutate(color_id = factor(GNIS_NAME))
-streams_used <- streams_named %>%
-  mutate(name_norm = stringr::str_squish(stringr::str_to_lower(GNIS_NAME)))
+streams_named <- grsm_streams %>%
+  filter(!is.na(gnis_name), gnis_name != "") %>%
+  mutate(color_id = factor(gnis_name)) %>%
+  rename(Stream = gnis_name)
+
 
 loc_used <- inverts_stream_sf %>%
   st_drop_geometry() %>%
-  dplyr::distinct(Stream) %>%
-  dplyr::mutate(name_norm = stringr::str_squish(stringr::str_to_lower(Stream)))
-
-streams_used <- streams_used %>%
-  dplyr::semi_join(loc_used, by = "name_norm")
+  dplyr::distinct(Stream) 
+streams_used <- streams_named %>%
+  dplyr::semi_join(loc_used, by = "Stream")
 
 
 # join locations to coords; keep one point per Location
@@ -440,68 +706,47 @@ sites_pts <- coords_sf %>%
 
 # one label point per stream name (keep all stream lines)
 stream_labels <- streams_used %>%
-  dplyr::group_by(GNIS_NAME, color_id) %>%
+  dplyr::group_by(Stream, color_id) %>%
   dplyr::summarise(do_union = TRUE, .groups = "drop") %>%
   sf::st_transform(26917) %>%
-  dplyr::mutate(geometry = sf::st_point_on_surface(geometry)) %>%  # one point near the middle
+  dplyr::mutate(geometry = sf::st_point_on_surface(geom)) %>%  # one point near the middle
   sf::st_transform(sf::st_crs(streams_used))
 
+watershed_labels <- st_point_on_surface(watershed_grsm )
 
 # 4) Plot: watersheds + border + filtered streams + locations
 ggplot() +
   geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  geom_sf(data = watershed,    fill = NA, color = "grey30", linewidth = 0.15) +
-  geom_sf(data = streams_used, aes(color = GNIS_NAME), linewidth = .75, alpha = 0.9) +
-  geom_sf_text(data = stream_labels, aes(label = GNIS_NAME, color = GNIS_NAME),
+  geom_sf(data = watershed,    fill = NA, color = "blue", linewidth = 0.15) +
+  geom_sf(data = streams_used, aes(color = Stream), linewidth = .75, alpha = 0.9) +
+  geom_sf_text(data = stream_labels, aes(label = Stream, color = Stream),
                size = 3, check_overlap = TRUE) +
+  geom_sf(data = sites_pts, aes(color = stream), size = 4) +
+  geom_sf_label(data = watershed, aes(label = name),fill = "white", fontface = "bold", sieze = 3, color = "blue",label.size = 0,
+                label.r = unit(0.15, "lines"), size = 3) +
   scale_color_viridis_d(option = "turbo", guide = "none") +
-  geom_sf(data = sites_pts, aes(color = stream), size = 2) +
+
   coord_sf() +
   labs(title = "GRSM Invert Locations") +
   theme_minimal(base_size = 14) +
   theme(panel.grid = element_blank()) 
 
-
+# No watershed
 ggplot() +
   geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  #geom_sf(data = watershed,    fill = NA, color = "grey30", linewidth = 0.15) +
-  geom_sf(data = streams_used, aes(color = GNIS_NAME), linewidth = .75, alpha = 0.9) +
-  geom_sf_text(data = stream_labels, aes(label = GNIS_NAME, color = GNIS_NAME),
-               size = 4, check_overlap = TRUE) +
-  scale_color_viridis_d(option = "turbo", guide = "none") +
-  geom_sf(data = sites_pts, aes(color =stream), size = 3) +
-  coord_sf() +
-  labs(title = "GRSM Invert Locations") +
-  theme_minimal(base_size = 14) +
-  theme(panel.grid = element_blank())
-
-# 4) Plot: watersheds + border + filtered streams + locations
-ggplot() +
-  geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  geom_sf(data = watershed,    fill = NA, color = "grey30", linewidth = 0.15) +
-  geom_sf(data = streams_used, aes(color = GNIS_NAME), linewidth = .75, alpha = 0.9) +
-  geom_sf_text(data = stream_labels, aes(label = GNIS_NAME, color = GNIS_NAME),
+  #geom_sf(data = watershed,    fill = NA, color = "blue", linewidth = 0.15) +
+  geom_sf(data = streams_used, aes(color = Stream), linewidth = .75, alpha = 0.9) +
+  geom_sf_text(data = stream_labels, aes(label = Stream, color = Stream),
                size = 3, check_overlap = TRUE) +
+  geom_sf(data = sites_pts, aes(color = stream), size = 4) +
+  #geom_sf_label(data = watershed, aes(label = name),fill = "white", fontface = "bold", sieze = 3, color = "blue",label.size = 0,
+    #            label.r = unit(0.15, "lines"), size = 3) +
   scale_color_viridis_d(option = "turbo", guide = "none") +
-  geom_sf(data = sites_pts, aes(color = stream), size = 2) +
   coord_sf() +
   labs(title = "GRSM Invert Locations") +
   theme_minimal(base_size = 14) +
   theme(panel.grid = element_blank()) 
 
-
-ggplot() +
-  geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  #geom_sf(data = watershed,    fill = NA, color = "grey30", linewidth = 0.15) +
-  geom_sf(data = streams_used, aes(color = GNIS_NAME), linewidth = .75, alpha = 0.9) +
-  geom_sf_text(data = stream_labels, aes(label = GNIS_NAME, color = GNIS_NAME),
-               size = 4, check_overlap = TRUE) +
-  scale_color_viridis_d(option = "turbo", guide = "none") +
-  geom_sf(data = sites_pts, aes(color =stream), size = 3) +
-  coord_sf() +
-  labs(title = "GRSM Invert Locations") +
-  theme_minimal(base_size = 14) +
-  theme(panel.grid = element_blank())
 
 
 
@@ -593,7 +838,7 @@ for (var in responses) {
   p <- ggplot() +
     geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
     geom_sf(data = streams_used, color = "grey70", linewidth = 0.5, alpha = 0.7) +
-    geom_sf_text(data = stream_labels, aes(label = GNIS_NAME), color = "black",
+    geom_sf_text(data = stream_labels, aes(label = Stream), color = "black",
                  size = 3, check_overlap = TRUE, show.legend = FALSE) +
     geom_sf(data = pts, aes(fill = fill_val),
             shape = 21, color = "black", size = 7, stroke = 0.3) +
