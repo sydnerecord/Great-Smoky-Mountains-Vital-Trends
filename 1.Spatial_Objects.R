@@ -207,7 +207,7 @@ mos <- 1:12
 elements <- c("ppt","tmean")   # add "tmin","tmax" later if you want
 
 
-grsm <- st_as_sf(st_union(st_make_valid(watershed_outline)))
+grsm <- st_as_sf(st_union(st_make_valid(grsm_watershed)))
 
 # --- 1) download monthly 800 m PRISM (tiny, explicit loop; no functions) ----
 for (el in elements) {
@@ -270,8 +270,8 @@ ppt_stack   <- rast(ppt_files)      # mm / month
 # Temperature
 tmean_stack <- rast(tmean_files)    # °C (GeoTIFFs from NACSE are in °C)
 
-stopifnot(exists("watershed_outline"))
-grsm_ll <- st_transform(st_as_sf(st_union(st_make_valid(watershed_outline))),
+stopifnot(exists("grsm_watershed"))
+grsm_ll <- st_transform(st_as_sf(st_union(st_make_valid(grsm_watershed))),
                         crs(ppt_stack))
 
 ppt_grsm   <- mask(crop(ppt_stack,   vect(grsm_ll)), vect(grsm_ll))
