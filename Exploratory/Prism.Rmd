@@ -1,0 +1,105 @@
+---
+title: "PRISM"
+author: "John Grady"
+date: "2025-10-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Read in libraries
+```{r}
+library(prism)
+library(terra)
+library(httr)
+library(utils)
+library(dplyr)
+library(stringr)
+library(sf)
+```
+Use GRSM watershed as border for PRISM data
+```{r}
+# Read watershed polygons (index [2] keeps the desired layer per your workflow)
+watershed <- st_read('/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Locations/GRSM_WATERSHEDS/GRSM_WATERSHEDS.shp')[2]
+plot(watershed)  # quick base plot check
+
+# Dissolve to a single outline (keeps a clean park border for maps)
+watershed_outline <- watershed |>
+  st_make_valid() |>
+  st_union() |>
+  st_cast("MULTIPOLYGON") |>
+  st_as_sf()
+
+# Quick outline check (base graphics)
+plot(st_geometry(watershed_outline), col = NA, border = "black", lwd = 2, axes = TRUE)
+```
+Prism monthly files are downloaded and averaged to get mean annual temperature (C) and precipitation (mm/yr)
+
+```{r}
+DL  <- "'/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine/Data/Climate/prism'"
+OUT <- file.path(DL, "annual"); dir.create(OUT, showWarnings = FALSE)
+
+ppt_files <- list.files(
+  DL,
+  pattern = "prism_ppt_us_30s_[0-9]{6}\\.tif$",
+  recursive = TRUE, full.names = TRUE, ignore.case = TRUE
+)
+
+tmean_files <- list.files(
+  DL,
+  pattern = "prism_tmean_us_30s_[0-9]{6}\\.tif$",
+  recursive = TRUE, full.names = TRUE, ignore.case = TRUE
+)
+
+order_by_ym <- function(x){
+  ym <- str_extract(basename(x), "[0-9]{6}")
+  x[order(ym)]
+}
+ppt_files   <- order_by_ym(ppt_files)
+tmean_files <- order_by_ym(tmean_files)
+
+length(ppt_files); length(tmean_files)   # should both be > 0
+
+# Precipitation
+ppt_stack   <- rast(ppt_files)      # mm / month
+# Temperature
+tmean_stack <- rast(tmean_files)    # °C (GeoTIFFs from NACSE are in °C)
+
+stopifnot(exists("watershed_outline"))
+grsm_ll <- st_transform(st_as_sf(st_union(st_make_valid(watershed_outline))),
+                        crs(ppt_stack))
+
+ppt_grsm   <- mask(crop(ppt_stack,   vect(grsm_ll)), vect(grsm_ll))
+tmean_grsm <- mask(crop(tmean_stack, vect(grsm_ll)), vect(grsm_ll))
+
+# figure out which monthly layers belong to each year from file names
+ym  <- str_extract(basename(ppt_files), "[0-9]{6}")
+yrs <- substr(ym, 1, 4)
+idx_by_year <- split(seq_along(yrs), yrs)
+years_vec <- names(idx_by_year)
+
+# annual MEAN (ppt = mean of 12 months; tmean = mean of 12 months)
+ppt_annual_mean <- rast(lapply(years_vec, function(yy) app(ppt_grsm[[ idx_by_year[[yy]] ]],
+                                                           mean, na.rm = TRUE)))
+tmean_annual_mean <- rast(lapply(years_vec, function(yy) app(tmean_grsm[[ idx_by_year[[yy]] ]],
+                                                             mean, na.rm = TRUE)))
+
+names(ppt_annual_mean)   <- paste0("ppt_mean_",   years_vec)
+names(tmean_annual_mean) <- paste0("tmean_mean_", years_vec)
+
+
+# brown → green (for precipitation)
+plot(ppt_annual_mean$ppt_mean_1980,
+     col = hcl.colors(20, "Terrain", rev = TRUE),   # earthy brown–green
+     main = "Annual Precipitation 1980 (mm)")
+
+# red → blue (for temperature)
+plot(tmean_annual_mean$tmean_mean_1980,
+     col = rev(hcl.colors(20, "RdBu")),             # red–blue diverging
+     main = "Annual Mean Temperature 1980 (°C)")
+
+```
+
+
+
