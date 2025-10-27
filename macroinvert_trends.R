@@ -48,7 +48,7 @@ inverts <- readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinver
 inverts_original = readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export.csv")) #unmodified
 
 # Spatial layers (consistent format)
-watershed = st_read(file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"))[2]
+grsm_watershed = st_read(file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"))[2]
 grsm_streams = st_read(file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"))
 
 
