@@ -1,0 +1,17 @@
+4.GRSM_fish_plotting ReadME
+
+Maps NPS fish codes ↔ common/scientific names, aggregates counts/biomass to Stream × Year, fits temporal trends per stream (GAM via mgcv, Gaussian on log or NegBin), and plots pooled or per-species trajectories with sensible log scaling and clean themes.
+
+Core plotting
+plot_stream_totals_with_fit(df, ADTDens, species = c("BKT","RBT","BNT"), species_mode = "pooled"|"separate", fit_type = "gaussian"|"nb", target = "avg_stream_sum"|"network_sum")
+Returns a ggplot showing stream lines and a black network trend. Species inputs can be codes, common, or scientific (case-insensitive).
+
+Batch exports
+export_species_pdfs(...) → one PDF per species (single-page).
+
+export_species_metrics_pdf_onefn(...) → multi-panel PDF per species across selected metrics (e.g., TOTpop, ADTDens, TOTBiom), with a shared legend and auto log scaling.
+
+Cumulative richness tools
+plot_all_streams_cumulative(...) and plot_stream_cumulative(...) plot observed cumulative richness vs cumulative individuals, with optional rarefaction curve and Chao1 horizontal reference.
+
+export_stream_chao_pdf(...) writes multi-page grids (9 per page) across streams.
