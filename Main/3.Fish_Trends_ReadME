@@ -1,0 +1,17 @@
+3.Fish_Trends ReadMe
+
+Loads watershed, park boundary, and stream shapefiles.
+
+Imports three-pass electrofishing summary data.
+
+Filters species and streams with sufficient sampling (≥5 years).
+
+Matches sampling locations to named hydrography lines.
+
+Fits per-stream linear models of adult density over time.
+
+Maps slope results across the park, highlighting significant trends.
+
+Generates time-series plots of adult density by stream for each species.
+
+Exports all trend maps and plots as PDFs for review.
