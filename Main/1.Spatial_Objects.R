@@ -10,18 +10,16 @@ library(utils)
 drive_path  <- "/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU"
 
 # GRSM border
-grsm_border0 <- sf::st_read(file.path(drive_path, "Maine/Locations/BOUNDARY_LN/BOUNDARY_LN.shp"))
+grsm_border0 <- sf::st_read(file.path(drive_path, "Maine/Spatial/BOUNDARY_LN/BOUNDARY_LN.shp"))
 grsm_border = st_union(grsm_border0)
 plot(grsm_border)
 
-# Watershed Data (indlucing HUC 10)
-gdb03 <- file.path(drive_path, "/Users/jgradym/Downloads/WBD_03_HU2_GDB/WBD_03_HU2_GDB.gdb") #Region 03 – South Atlantic–Gulf (drains to the Atlantic)
-gdb06 <- file.path(drive_path,"WBD_06_HU2_GDB/WBD_06_HU2_GDB.gdb") # Region 06 – Tennessee (drains to the Mississippi)
 
-                   
-stream_dir <- file.path(drive_path, "/Maine/Locations/Streams")
+gdb03 <- file.path(drive_path, "Maine/Spatial/Watershed/03/WBD_03_HU2_GDB.gdb") #Region 03 – South Atlantic–Gulf (drains to the Atlantic)
+gdb06 <- file.path(drive_path, "Maine/Spatial/Watershed/06/WBD_06_HU2_GDB.gdb") #Region 06 – Tennessee (drains to the Mississippi)
+
 st_layers(gdb03)
-
+                   
 # Load HUC10 (Watershed) polygons for both regions (watershed boundary dataset = wbd)
 wbd10_03 <- st_read(gdb03, "WBDHU10", quiet = TRUE)
 wbd10_06 <- st_read(gdb06, "WBDHU10", quiet = TRUE)
@@ -44,7 +42,6 @@ grsm_watershed = grsm_watershed %>%
   filter(!name %in% c("Sinking Creek-Tennessee River", "French Broad River", "Gulf Fork Big Creek", "Richland Creek-Pigeon River",
                       "Cheoah River", "Alarka Creek-Little Tennessee River", "Middle Tuckasegee River","Upper Tellico Lake",
                       "Lower Tellico Lake")) 
-st_write(grsm_watershed, file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"), delete_dsn = TRUE)
 # Plot with labels
 watershed_labels <- st_point_on_surface(watershed_grsm )
 
@@ -64,21 +61,55 @@ ggplot() +
   theme(panel.grid = element_blank(), plot.title = element_text(hjust = 0.5))
 
 
+st_write(grsm_watershed, file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"), delete_dsn = TRUE)
+
 #----------------------------------
 #------ Add streams --------------
 #---------------------------------
-
+# ======================================================================
+# Purpose:
+#   Download (or use existing) NHDPlus High Resolution (HR) hydrography data
+#   for two hydrologic subregions (HU4 0307 and 0601) that cover Great Smoky
+#   Mountains National Park (GRSM), extract stream flowlines, standardize them,
+#   and prepare for spatial clipping to the park watershed.
+#
+# What is NHDPlus HR?
+#   - "NHD" = National Hydrography Dataset, produced by the U.S. Geological Survey (USGS).
+#   - "Plus" = combines NHD flowlines with elevation-derived catchments, flow direction,
+#     and attributes (e.g., stream order, length, reach codes).
+#   - "HR" = High Resolution version (~1:24,000 scale), distributed by HU4 region (Hydrologic Unit Code).
+#
+# What are we downloading?
+#   Each "NHDPLUS_H_<HU4>_HU4_GDB.gdb" file is an Esri File Geodatabase (.gdb)
+#   containing multiple feature classes — the key one is "NHDFlowline" (vector
+#   stream lines with rich attributes). These files come from the USGS NHDPlus HR FTP server.
+#
+# References:
+#   https://www.usgs.gov/national-hydrography/nhdplus-high-resolution
 
 # --- NHDPlus HR download + flowlines ---
 
 # USGS source for watersheds and stream hyrdrology of GRSM:
 #https://www.usgs.gov/national-hydrography/access-national-hydrography-products
 #https://apps.nationalmap.gov/downloader/#/
+stream_dir <- file.path(drive_path, "Maine/Spatial/Streams")
 
 dir.create(stream_dir, recursive = TRUE, showWarnings = FALSE)
+
+# --- Select hydrologic subregions to include ---------------------------
+# HU4 codes for subregions overlapping GRSM:
+#   0307 = South Atlantic–Gulf (drains to the Atlantic)
+#   0601 = Tennessee (drains to the Mississippi)
 hu4s <- c("0307","0601")
+
+# --- Download NHDPlus HR data (optional) -------------------------------
+# This step fetches the NHDPlus HR geodatabases from USGS servers.
+# You can skip this if you already have local .gdb folders.
+# Each HU4 download is large (~1–2 GB per subregion).
 download_nhdplushr(nhd_dir = stream_dir, hu_list = hu4s, download_files = TRUE)
 
+# --- Locate downloaded geodatabases -----------------------------------
+# Recursively list all folders ending in ".gdb"
 gdb_paths <- list.dirs(stream_dir, recursive = TRUE, full.names = TRUE) |>
   grep("\\.gdb$", x = _, value = TRUE)
 
@@ -87,9 +118,14 @@ flow_list <- lapply(gdb_paths, function(g) {
     select(any_of(c("GNIS_Name","gnis_name","FType","FCode","ReachCode","reachcode","NHDPlusID","nhdplusid","geometry")))
 })
 
-# check crdds
+# --- Check coordinate reference systems (CRS) --------------------------
+# Print CRS for each loaded HU4 dataset
 imap(flow_list, ~ { message(.y, ": ", st_crs(.x)$input); NULL })
-# drop the vertical crs
+
+# Clean each flowline dataset:
+#  - Drop Z/M coordinates (keep XY only)
+#  - Reproject to UTM 17N
+#  - Convert column names to lowercase for consistency
 
 flows_norm <- map(flow_list, ~ .x %>%
                      sf::st_zm(drop = TRUE) %>%
@@ -99,6 +135,10 @@ flows_norm <- map(flow_list, ~ .x %>%
 
 target_crs <- 26917
 unique(flows_norm$ftype)
+
+# --- Merge and simplify -----------------------------------------------
+# Combine all HU4 flowlines into one dataset
+# Ensure geometries are valid, then simplify slightly (50 m tolerance)
 flows <- dplyr::bind_rows(flows_norm) %>%
   sf::st_make_valid() %>%
   sf::st_simplify(dTolerance = 50)  # meters in UTM
