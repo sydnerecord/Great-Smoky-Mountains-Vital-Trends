@@ -1,0 +1,3 @@
+5.GRSM_Fish_3-Pass_Summary_ReadME
+
+Examples of running plotting functions using negative binomial fits - whether species specific or all species combined. 
