@@ -89,7 +89,7 @@ st_write(grsm_watershed, file.path(drive_path, "Maine/Spatial/Watershed/GRSM_wat
 
 # --- NHDPlus HR download + flowlines ---
 
-# USGS source for watersheds and stream hyrdrology of GRSM:
+# USGS source for watersheds and stream hydrology of GRSM:
 #https://www.usgs.gov/national-hydrography/access-national-hydrography-products
 #https://apps.nationalmap.gov/downloader/#/
 stream_dir <- file.path(drive_path, "Maine/Spatial/Streams")
@@ -158,47 +158,61 @@ grsm_stream <- st_intersection(
 ) |> dplyr::filter(!is.na(gnis_name), gnis_name != "")
 grsm_stream = grsm_stream[1]
 
-#st_write(grsm_stream, file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"), delete_dsn = TRUE)
+plot(grsm_stream)
+st_write(grsm_stream, file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"), delete_dsn = TRUE)
 
 
 watershed_label <- st_point_on_surface(grsm_watershed )
 
-# --- Label points (midpoint per named stream) ---
-lines_longest <- grsm_stream |>
+
+# 1) Merge all segments per name into a single (multi)line
+lines_merged <- grsm_stream |>
   st_transform(26917) |>
-  st_collection_extract("LINESTRING") |>
   dplyr::filter(!is.na(gnis_name), gnis_name != "") |>
   dplyr::group_by(gnis_name) |>
-  dplyr::summarise(shape = st_line_merge(st_union(shape)), .groups = "drop") |>
+  dplyr::summarise(do_union = TRUE, .groups = "drop") |>
+  st_line_merge()  # merge contiguous parts where possible
+
+# 2) If some are still MULTILINESTRING, break into LINESTRINGs and keep the longest per name
+lines_longest <- lines_merged |>
   st_cast("LINESTRING", warn = FALSE) |>
-  dplyr::group_by(gnis_name) |>                                   # <- re-group here
+  dplyr::group_by(gnis_name) |>
+  dplyr::slice_max(st_length(geometry), n = 1, with_ties = FALSE) |>
   dplyr::ungroup()
 
-pts_utm <- st_cast(st_line_sample(lines_longest, sample = 0.5), "POINT")
-
+# one label point at the midpoint of each longest line
 label_pts <- st_sf(
   gnis_name = lines_longest$gnis_name,
-  shape     = pts_utm,
-  crs       = st_crs(lines_longest)
-) |>
-  st_transform(st_crs(grsm_stream))
+  geometry  = st_cast(st_line_sample(lines_longest, sample = 0.5), "POINT")) |>
+  st_transform(st_crs(grsm_stream))  # match your plotting CRS
 
-write
+# Plot
+ggplot() +
+  geom_sf(
+    data = lines_longest,
+    aes(color = gnis_name),
+    linewidth = 1
+  ) +
+  geom_sf_text(
+    data = label_pts,
+    aes(label = gnis_name, color = gnis_name),
+    check_overlap = TRUE,
+    size = 3
+  ) +
+  scale_color_viridis_d(option = "turbo", guide = "none") +  # shared color scale
+  theme_void()
 
-# --- Your plot (unchanged aesthetics) ---
-# Reduce stream names  to those in data files
-inverts <- readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_locations.csv")) # locations added
-inverts$StreamName
 
 
-# Watersheds + Streams that inverts were sampled in
+
+# All streams + watershed
 ggplot() +
   geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
   geom_sf(data = grsm_watershed, fill = NA, color = "blue", linewidth = 0.4) +
   
-  geom_sf(data = grsm_stream %>% filter(!is.na(gnis_name), gnis_name %in% inverts$StreamName),
+  geom_sf(data = grsm_stream,
           aes(color = gnis_name), linewidth = 0.4, show.legend = F) +
-  geom_sf_text(data = label_pts %>% filter(gnis_name %in% inverts$StreamName),
+  geom_sf_text(data = label_pts,
                aes(label = gnis_name, color = gnis_name),
                size = 2.6, check_overlap = TRUE, show.legend = F) +
   geom_sf_label(data = watershed_label, aes(label = name),fill = "white", fontface = "bold", sieze = 3, color = "blue",label.size = 0,
@@ -209,7 +223,31 @@ ggplot() +
   theme(panel.grid = element_blank())
 
 
+# An example of how to reduce stream names for plotting to those in relevant files
+inverts <- readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_locations.csv")) # locations added
+inverts$StreamName
+# Streams filtered to invert taxa sampling (and park borders)
+ggplot() +
+  geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
+  geom_sf(data = grsm_watershed, fill = NA, color = "blue", linewidth = 0.4) +
+  #filter streams here
+  geom_sf(data = grsm_stream %>% filter(!is.na(gnis_name), gnis_name %in% inverts$StreamName),
+          aes(color = gnis_name), linewidth = 0.4, show.legend = F) +
+  geom_sf_text(data = label_pts %>% filter(gnis_name %in% inverts$StreamName),
+               aes(label = gnis_name, color = gnis_name),
+               size = 2.6, check_overlap = TRUE, show.legend = F) +
+  geom_sf_label(data = watershed_label, aes(label = name),fill = "white", fontface = "bold", size = 3, color = "blue",label.size = 0,
+                label.r = unit(0.15, "lines"), size = 3) +
+  coord_sf() +
+  ggtitle("GRSM Watersheds (blue) and Streams with Invert Sampling (color)") +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid = element_blank())
+
+
+
 #------ Streams with fish -----
+
+# Filter to streams with fish sampling
 three_pass <- read_csv(file.path(drive_path, 'Maine/Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_loc.csv'))
 
 ggplot() +
@@ -237,7 +275,9 @@ plot(grsm_border)
 
 
 # Download PRISM data to a folder
-DL  <- file.path(drive_path, 'Maine/Data/Climate/prism')
+
+#!!!!!!!!!!! Time consuming and big files only download once!!!!!!!!
+DL  <- file.path(choose_your_path, 'prism')
 OUT <- file.path(DL, "annual")
 dir.create(DL,  recursive = TRUE, showWarnings = FALSE)
 dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
@@ -279,8 +319,6 @@ for (el in elements) {
     message("OK: ", el, " ", ym)
   }
 }
-
-# 
 
 
 # Load data and get a raster stack
@@ -334,7 +372,6 @@ names(tmean_annual_mean) <- paste0("tmean_mean_", years_vec)
 
 # Write rasters - mean temp and precip
 writeRaster(ppt_annual_mean, file.path(drive_path, 'Maine/Data/Climate/PRISM_GRSM_precip_annual_mean_stack.tif'))
-
 writeRaster(tmean_annual_mean, file.path(drive_path, 'Maine/Data/Climate/PRISM_GRSM_temp_annual_mean_stack.tif'))
 
 
