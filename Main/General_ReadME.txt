@@ -1,3 +1,6 @@
+# Great-Smoky-Mountains-Vital-Trends
+Code to analyze vital trends data for Great Smoky Mountains National Park
+
 Description of Code
 
 1. Spatial_Objects.R - This script builds USGS hydrology and climate layers from PRISM. It reads the park boundary, merges HUC10 watersheds (Regions 03 & 06), filters those within GRSM, and clips NHDPlus HR flowlines. Creates labeled maps for surveyed streams. Downloads 1980–2023 PRISM precipitation and temperature, masks to GRSM, computes annual means, and saves GeoTIFF stacks with quick preview plots
