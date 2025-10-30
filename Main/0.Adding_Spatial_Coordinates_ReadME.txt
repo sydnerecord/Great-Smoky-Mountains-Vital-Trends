@@ -1,0 +1,14 @@
+Adding_Spatial_Coordinates ReadME
+
+1. Added spatial coordinates to all usable data files. 
+
+2. Spatial coordinates for forest and soil locations were were from the unedited GRsM file 'GRSM_CESU/Maine/Data/Forest_Health/Locations.csv'.
+
+3. Spatial coordinates for three_pass fish were accessed and downloaded here
+	# https://grsm-nps.opendata.arcgis.com/search?collection=dataset&q=Fisheries
+	# click GRSM THREE PASS -> Download -> CSV
+ 	# Csv saved at GRSM_CESU/Maine/Data/Aquatics_Fish/Three_Pass/Locations/GRSM_THREE_PASS.csv (includes other metadata too)
+
+4. Spatial coordinates for macro invertebrates were accessed and joined from this GRSM file:
+	 GRSM_CESU/Maine/Data/Aquatics_Macroinverts/Documents/Locations.csv
+
