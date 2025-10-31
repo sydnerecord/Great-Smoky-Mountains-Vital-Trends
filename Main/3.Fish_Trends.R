@@ -6,6 +6,7 @@ library(readxl)        # read_xlsx() for NCBI file
 library(viridisLite)   # color options
 library(sf)            # spatial analysis
 library(tidyverse)     # data import (readr), manipulation (dplyr), plotting (ggplot2), strings (stringr)
+library(scales)
 
 
 
@@ -37,7 +38,7 @@ theme_plot <- function(legend = TRUE) {
 drive_path  <- "/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU"
 
 # fish data
-three_pass <- read_csv(file.path(drive_path, 'Maine/Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_loc.csv'))
+three_pass <- read_csv(file.path(drive_path, 'Maine/Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_coordinates.csv'))
 str(three_pass)
 # Location Categories - Stream and LOC_NAME or Code, Watershed and Streamname
 # Response variables :
@@ -54,8 +55,52 @@ str(three_pass)
 #ADTBiom – Biomass of adult fish.
 #TOTBiom – Total fish biomass (YOY + adult)
 
+
+# --- Species lookup table -------------------------------------
+species_lookup <- tibble::tribble(
+  ~code, ~common, ~scientific,
+  "BEC","Bigeye Chub","Hybopsis amblops",
+  "BRH","Black Redhorse","Moxostoma duquesnei",
+  "GFD","Greenfin Darter","Etheostoma chlorobranchium",
+  "GID","Gilt Darter","Percina evides",
+  "NHS","Northern Hog Sucker","Hypentelium nigricans",
+  "RIC","River Chub","Nocomis micropogon",
+  "RLD","Redline Darter","Etheostoma rufilineatum",
+  "ROB","Rock Bass","Ambloplites rupestris",
+  "SMB","Smallmouth Bass","Micropterus dolomieu",
+  "STR","Striped Shiner","Luxilus chrysocephalus",
+  "TES","Telescope Shiner","Notropis telescopus",
+  "TNS","Tennessee Shiner","Notropis leuciodus",
+  "WPS","Warpaint Shiner","Luxilus coccogenis",
+  "WTS","Whitetail Shiner","Cyprinella galactura",
+  "BAD","Banded Darter","Etheostoma zonale",
+  "RBT","Rainbow Trout","Oncorhynchus mykiss",
+  "WHS","White Sucker","Catostomus commersonii",
+  "BND","Blacknose Dace","Rhinichthys atratulus",
+  "WND","Wounded Darter","Etheostoma vulneratum",
+  "CKC","Creek Chub","Semotilus atromaculatus",
+  "SMT","Smoky Madtom","Noturus baileyi",
+  "CIT","Citico Darter","Etheostoma sitikuense",
+  "BNT","Brown Trout","Salmo trutta",
+  "RSD","Rosyside Dace","Clinostomus funduloides",
+  "SAS","Saffron Shiner","Notropis rubricroceus",
+  "FHM","Fathead Minnow","Pimephales promelas",
+  "LND","Longnose Dace","Rhinichthys cataractae",
+  "FTD","Fantail Darter","Etheostoma flabellare",
+  "TND","Tennessee Dace","Chrosomus tennesseensis",
+  "BKT","Brook Trout","Salvelinus fontinalis"
+)
+
+
+species_lookup %>%
+  dplyr::filter(code %in% species_min) %>%
+  dplyr::select(code, common, scientific)
+
+#----------- Add spatial layers -------------------
+
 # Spatial layers (consistent format)
 grsm_watershed = st_read(file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"))[2]
+
 grsm_streams = st_read(file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"))
 
 grsm_border <- sf::st_read(file.path(drive_path, "Maine/Spatial/BOUNDARY_LN/BOUNDARY_LN.shp"))[6] %>%
@@ -119,55 +164,101 @@ ggplot(base_5yr, aes(y = Year, x = doy, color = Stream)) +
   theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5))
 
 # ----------------------------
-# 2) Identify eligible species with minimum years sampling calledmin_sample
+# Identify eligible species with minimum years sampling 
 # ----------------------------
-min_sample <- 5
 
-species_min <- three_pass %>%
-  mutate(Year = as.integer(format(Date, "%Y"))) %>%
-  group_by(Species, Year) %>%
-  summarise(has_adults = any(is.finite(ADTDens) & ADTDens > 0), .groups = "drop") %>%
-  group_by(Species) %>%
-  summarise(n_years_pos = sum(has_adults), .groups = "drop") %>%
-  filter(n_years_pos >= min_sample) %>%
-  pull(Species)
-species_min
 
 # ----------------------------
-# 3) First coordinate per stream
+# Spatial analysis
 # ----------------------------
+# Use one projection everywhere (NAD83 / UTM 17N)
+target_crs <- 26917
+
+# --- Ensure common CRS -------------------------------------------------
+grsm_watershed <- st_transform(grsm_watershed, target_crs)   # must have a 'name' col
+grsm_border    <- st_transform(grsm_border,    target_crs)
+grsm_streams   <- st_transform(grsm_streams,   target_crs)
+
+# --- One coordinate per stream from fish data --------------------------
 fish_locs_sf <- three_pass %>%
   filter(is.finite(LAT), is.finite(LON)) %>%
   arrange(Stream, Date) %>%
   group_by(Stream) %>%
   slice_head(n = 1) %>%
   st_as_sf(coords = c("LON","LAT"), crs = 4326, remove = FALSE) %>%
-  transmute(Location = Stream, geometry) %>%
-  st_transform(st_crs(grsm_watershed))
+  st_transform(target_crs) %>%
+  transmute(Location = Stream, name_norm = str_squish(str_to_lower(Stream)), geometry)
 
-# ----------------------------
-# 4) Match hydro lines to those streams
-# ----------------------------
+# --- Match hydro lines to those streams (normalize both sides) ----------
 streams_matched_sf <- grsm_streams %>%
   filter(!is.na(gnis_name), gnis_name != "") %>%
-  semi_join(
-    fish_locs_sf %>%
-      st_drop_geometry() %>%
-      transmute(name_norm = str_squish(str_to_lower(Location))),
-    by = c("gnis_name" = "Stream")) %>%
-  st_transform(st_crs(grsm_watershed))
+  mutate(name_norm = str_squish(str_to_lower(gnis_name))) %>%
+  semi_join(fish_locs_sf %>% st_drop_geometry() %>% select(name_norm), by = "name_norm")
 
-# Label points for stream names
+# --- Labels: one point per stream & per watershed ----------------------
 stream_labels_sf <- streams_matched_sf %>%
   group_by(gnis_name) %>%
-  summarise(do_union = TRUE, .groups = "drop") %>%
-  st_transform(26917) %>%
-  mutate(geometry = st_point_on_surface(geom)) %>%
-  st_transform(st_crs(streams_matched_sf))
+  summarize(do_union = TRUE, .groups = "drop") %>%
+  mutate(geometry = st_point_on_surface(geom))
 
+# If your watershed name column isn’t 'name', change it below
+watershed_labels_sf <- grsm_watershed %>%
+  mutate(geometry = st_point_on_surface(geom)) %>%
+  select(name, geometry)
+
+# --- Plot --------------------------------------------------------------
+# With watershed
+ggplot() +
+  geom_sf(data = grsm_border,     fill = NA, color = "gray50", linewidth = 1) +
+  geom_sf(data = grsm_watershed,  fill = NA, color = "blue", linewidth = 0.6) +
+  geom_sf_label(data = watershed_labels_sf, aes(label = name),
+                fill = "white", color = "blue", fontface = "bold",
+                label.size = 0, label.r = grid::unit(0.15, "lines"), size = 3) +
+  geom_sf(data = streams_matched_sf, aes(color = gnis_name), linewidth = 0.75, alpha = 0.9) +
+  geom_sf(data = fish_locs_sf, aes(color = Location), size = 4) +
+  geom_sf_text(data = stream_labels_sf,   aes(label = gnis_name, color = gnis_name),
+               size = 3, check_overlap = TRUE) +
+  scale_color_viridis_d(option = "turbo", guide = "none") +
+  coord_sf() +
+  labs(title = "GRSM Fish Sampling Locations") +
+  theme_minimal(base_size = 14) +
+  theme(panel.grid = element_blank())
+
+# Without watershed
+ggplot() +
+  geom_sf(data = grsm_border,     fill = NA, color = "gray50", linewidth = 1) +
+  geom_sf(data = streams_matched_sf, aes(color = gnis_name), linewidth = 0.75, alpha = 0.9) +
+  geom_sf(data = fish_locs_sf, aes(color = Location), size = 4) +
+  geom_sf_text(data = stream_labels_sf,   aes(label = gnis_name, color = gnis_name),
+               size = 3, check_overlap = TRUE) +
+  scale_color_viridis_d(option = "turbo", guide = "none") +
+  coord_sf() +
+  labs(title = "GRSM Fish Sampling Locations") +
+  theme_minimal(base_size = 14) +
+  theme(panel.grid = element_blank())
+
+
+# Fit per-(Species, Stream) linear models
 # ----------------------------
-# 5) Fit per-(Species, Stream) linear models
-# ----------------------------
+
+
+min_sample <- 5 # same nubmer of species if min_sample = 2
+
+species_min <- three_pass %>%
+  dplyr::mutate(Year = lubridate::year(Date)) %>%
+  dplyr::group_by(Species, Stream, Year) %>%
+  dplyr::summarise(has_adults = any(is.finite(ADTDens) & ADTDens > 0),
+                   .groups = "drop_last") %>%
+  dplyr::summarise(n_years_pos = sum(has_adults), .groups = "drop") %>%
+  dplyr::summarise(max_years_pos = max(n_years_pos), .by = Species) %>%
+  dplyr::filter(max_years_pos >= min_sample) %>%
+  dplyr::pull(Species)
+
+# Which species with multiyear sampling?
+species_lookup %>%
+  dplyr::filter(code %in% species_min) %>%
+  dplyr::select(code, common, scientific)
+
 lm_species_stream <- three_pass %>%
   mutate(Year = as.integer(format(Date, "%Y"))) %>%
   filter(Species %in% species_min, is.finite(ADTDens), ADTDens > 0) %>%
@@ -188,42 +279,9 @@ lm_species_stream <- three_pass %>%
   }) %>%
   ungroup()
 
-# ----------------------------
-# 6) Attach geometries to model results
-# ----------------------------
-lm_species_stream_sf <- lm_species_stream %>%
-  left_join(fish_locs_sf %>% select(Stream = Location, geometry), by = "Stream") %>%
-  st_as_sf() %>%
-  st_transform(st_crs(grsm_watershed))
+unique(lm_species_stream$Species)
+# "BKT" "BNT" "RBT" "ROB" "SMB"
 
-# Show where they live
-
-ggplot() +
-  geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  geom_sf(data = grsm_watershed,    fill = NA, color = "grey30", linewidth = 0.15) +
-  geom_sf(data = streams_matched_sf, aes(color = gnis_name), linewidth = 0.75, alpha = 0.9) +
-  geom_sf_text(data = stream_labels_sf, aes(label = gnis_name, color = gnis_name),
-               size = 3, check_overlap = TRUE) +
-  scale_color_viridis_d(option = "turbo", guide = "none") +
-  geom_sf(data = fish_locs_sf, aes(color = Location), size = 2) +
-  coord_sf() +
-  labs(title = "GRSM Fish Sampling Locations") +
-  theme_minimal(base_size = 14) +
-  theme(panel.grid = element_blank())
-
-
-ggplot() +
-  geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  # geom_sf(data = grsm_watershed,  fill = NA, color = "grey30", linewidth = 0.15) +
-  geom_sf(data = streams_matched_sf, aes(color = gnis_name), linewidth = 0.75, alpha = 0.9) +
-  geom_sf_text(data = stream_labels_sf, aes(label = gnis_name, color = gnis_name),
-               size = 4, check_overlap = TRUE) +
-  scale_color_viridis_d(option = "turbo", guide = "none") +
-  geom_sf(data = fish_locs_sf, aes(color = Location), size = 3) +
-  coord_sf() +
-  labs(title = "GRSM Fish Sampling Locations") +
-  theme_minimal(base_size = 14) +
-  theme(panel.grid = element_blank())
 
 # ----------------------------
 # 7) Plot one species (example: RBT)
@@ -235,32 +293,36 @@ species_names <- tibble::tibble(
               "Blacknose Dace", "Longnose Dace")
 )
 
-sp <- "LND"
+sp <- "BKT"
 # Toggle: TRUE = gray out nonsignificant slopes, FALSE = color all
 gray_out <- F
 p_thresh <- 0.05
 
+
+sp_name <- "Brook Trout"
+
+
+# Create a plotting dataframe for one species, with slope filtering logic
 dat <- lm_species_stream_sf %>%
   dplyr::left_join(species_names, by = "Species") %>%
   dplyr::filter(Species == sp) %>%
   dplyr::mutate(
-    fill_val = if (gray_out)
-      ifelse(p_value < p_thresh, slope, NA_real_)
-    else slope
+    fill_val = dplyr::if_else(
+      gray_out & p_value >= p_thresh,
+      NA_real_,
+      slope
+    )
   )
 
-sp_name <- unique(dat$Common)
-max_abs <- max(abs(dat$slope), na.rm = TRUE)
-if (!is.finite(max_abs) || max_abs == 0) max_abs <- 1
-
+# Plot
 ggplot() +
-  geom_sf(data = grsm_border, fill = NA, color = "gray40", linewidth = 1) +
-  geom_sf(data = grsm_watershed, fill = NA, color = "grey70", linewidth = 0.2) +
+  geom_sf(data = grsm_border,    fill = NA, color = "gray40", linewidth = 1) +
+  geom_sf(data = grsm_watershed, fill = NA, color = "grey70", linewidth = 0.3) +
   geom_sf(data = streams_matched_sf, color = "grey70", linewidth = 0.6, alpha = 0.9) +
   geom_sf_text(data = stream_labels_sf, aes(label = gnis_name),
                color = "grey40", size = 3, check_overlap = TRUE) +
   geom_sf(data = dat, aes(fill = fill_val),
-          shape = 21, color = "black", size = 4, stroke = 0.3) +
+          shape = 21, color = "black", size = 5, stroke = 0.3) +
   scale_fill_gradientn(colors = c("#1E90FF", "white", "red"),
                        limits = c(-max_abs, max_abs),
                        na.value = "grey80", name = "Slope") +
@@ -268,6 +330,7 @@ ggplot() +
   labs(title = paste0("Adult Density Trend — ", sp_name)) +
   theme_minimal(base_size = 14) +
   theme(panel.grid = element_blank())
+
 
 
 #-------- loop ------
@@ -362,7 +425,7 @@ for (sp in species_list) {
     geom_sf(data = grsm_border, fill = NA, color = "gray40", linewidth = 1) +
     geom_sf(data = grsm_watershed, fill = NA, color = "grey70", linewidth = 0.2) +
     geom_sf(data = streams_matched_sf, color = "grey70", linewidth = 0.6, alpha = 0.9) +
-    geom_sf_text(data = stream_labels_sf, aes(label = GNIS_NAME),
+    geom_sf_text(data = stream_labels_sf, aes(label = gnis_name),
                  color = "grey40", size = 3, check_overlap = TRUE) +
     geom_sf(data = dat, aes(fill = fill_val),
             shape = 21, color = "black", size = 4, stroke = 0.3) +
@@ -385,12 +448,59 @@ cat("PDF saved to:", normalizePath(pdf_out), "\n")
 # Fish: trends per species (each stream plotted)
 # - Exclude zeros
 # - Average per Code–Year, then Stream–Year
-# - Require ≥5 years per stream for plotting
+# - Require ≥5 years per stream for plotting 
+# loop through species
 # ===========================================
 
-library(tidyverse)
-library(scales)
-library(viridisLite)
+
+# Species to plot
+species_list <- sort(unique(lm_species_stream_sf$Species))
+
+# Year range for axes
+yrs <- range(fish_species_stream_year$Year, na.rm = TRUE)
+
+# Output path
+pdf_path <- "~/Downloads/adult_density_all_species.pdf" # update to your computer
+
+# Open a multi-page PDF device
+pdf(pdf_path, width = 8, height = 6, useDingbats = FALSE)  # useDingbats=FALSE for clean text rendering
+
+for (sp in species_list) {
+  
+  # Lookup common name
+  sp_common <- species_names %>%
+    filter(Species == sp) %>%
+    pull(Common)
+  
+  title_text <- if (length(sp_common) == 0) sp else paste0(sp, " — ", sp_common)
+  
+  # Build plot
+  p <- ggplot(
+    fish_species_stream_year %>%
+      filter(Species == sp, n_years_stream >= 5),
+    aes(x = Year, y = mean_adult_density, color = Stream, group = Stream)
+  ) +
+    geom_line() +
+    geom_point(size = 2) +
+    geom_smooth(method = "lm", linetype = "dashed", se = FALSE, linewidth = 0.75) +
+    scale_y_log10(
+      breaks = log_breaks(base = 10),
+      labels = label_number(accuracy = 1, trim = TRUE)
+    ) +
+    scale_x_continuous(
+      breaks = seq(yrs[1], yrs[2], by = 5),
+      limits = c(yrs[1], yrs[2])
+    ) +
+    scale_color_viridis_d(option = "turbo") +
+    labs(x = "Year", y = "Adult Density", color = "Stream") +
+    theme_plot() +
+    ggtitle(paste0("Adult Density — ", title_text))
+  
+  print(p)  # prints to the open PDF device
+}
+
+dev.off()  # close the PDF device
+
 
 # 1) Build per-species, per-stream, per-year means (exclude 0s first)
 fish_species_stream_year <- three_pass %>%
@@ -406,6 +516,7 @@ fish_species_stream_year <- three_pass %>%
 
 # 2) Pick a species (change "RBT" as needed)
 sp <- "RBT"
+
 yrs <- fish_species_stream_year %>%
   filter(Species == sp) %>%
   summarise(rng = range(Year, na.rm = TRUE)) %>%
@@ -415,8 +526,7 @@ yrs <- fish_species_stream_year %>%
 ggplot(
   fish_species_stream_year %>%
     filter(Species == sp, n_years_stream >= 5),
-  aes(x = Year, y = mean_adult_density, color = Stream, group = Stream)
-) +
+  aes(x = Year, y = mean_adult_density, color = Stream, group = Stream)) +
   geom_line() +
   geom_point(size = 2) +
   geom_smooth(method = "lm", linetype = "dashed", se = FALSE, size = 0.75) +
@@ -425,9 +535,12 @@ ggplot(
   scale_x_continuous(breaks = seq(yrs[1], yrs[2], by = 5),
                      limits = c(yrs[1], yrs[2])) +
   scale_color_viridis_d(option = "turbo") +
-  labs(x = "Year", y = "Adult Density (mean per stream-year)", color = "Stream") +
+  labs(x = "Year", y = "Adult Density", color = "Stream") +
   theme_plot() +
   ggtitle(paste0("Adult Density — ", sp))
+
+
+
 
 
 # ================================================================
@@ -440,16 +553,7 @@ ggplot(
 # - Output: one PDF page per species
 # ================================================================
 
-library(tidyverse)
-library(scales)
-library(viridisLite)
 
-# Lookup table for species code → full name
-species_names <- tibble::tibble(
-  Species = c("BKT", "BNT", "RBT", "ROB", "SMB"),
-  Common  = c("Brook Trout", "Brown Trout", "Rainbow Trout",
-              "Rock Bass", "Smallmouth Bass")
-)
 
 # 1) Prepare per-species, per-stream, per-year data
 fish_species_stream_year <- three_pass %>%
@@ -463,45 +567,45 @@ fish_species_stream_year <- three_pass %>%
   mutate(n_years_stream = n_distinct(Year)) %>%
   ungroup()
 
-# 2) PDF setup
-pdf_out <- "~/Downloads/fish_trends_per_species_streams.pdf"
-pdf(file = pdf_out, width = 11, height = 7)
+# 0) Save loop
+pdf_out <- path.expand("~/Downloads/fish_trends_per_species_streams.pdf") #update output path
+dir.create(dirname(pdf_out), showWarnings = FALSE, recursive = TRUE)
 
-# 3) Loop by species (plot each to a separate page)
-for (sp in sort(unique(fish_species_stream_year$Species))) {
-  yrs <- fish_species_stream_year %>%
-    filter(Species == sp) %>%
-    summarise(rng = range(Year, na.rm = TRUE)) %>%
-    pull(rng)
-  
+# 1) Open PDF device
+pdf(file = pdf_out, width = 11, height = 7, useDingbats = FALSE)
+on.exit(dev.off(), add = TRUE)
+
+# 2) Loop and PLOT at least something
+species_list <- sort(unique(fish_species_stream_year$Species))
+n_pages <- 0L
+
+for (sp in species_list) {
   dat <- fish_species_stream_year %>%
     filter(Species == sp, n_years_stream >= 5) %>%
     left_join(species_names, by = "Species")
   
-  if (nrow(dat) == 0) next
+  if (nrow(dat) == 0L || n_distinct(dat$Year) < 2L) next
   
-  sp_name <- unique(dat$Common)
+  yrs <- range(dat$Year, na.rm = TRUE)
+  sp_name  <- unique(dat$Common)
+  title_txt <- if (length(sp_name)==0 || is.na(sp_name)) sp else paste0(sp_name, " (", sp, ")")
   
-  p <- ggplot(dat, aes(x = Year, y = mean_adult_density,
-                       color = Stream, group = Stream)) +
+  p <- ggplot(dat, aes(Year, mean_adult_density, color = Stream, group = Stream)) +
     geom_line() +
     geom_point(size = 2) +
-    scale_y_log10(breaks = log_breaks(base = 10),
-                  labels = label_number(accuracy = 1, trim = TRUE)) +
-    scale_x_continuous(breaks = seq(yrs[1], yrs[2], by = 5),
-                       limits = c(yrs[1], yrs[2])) +
+    geom_smooth(method = "lm", linetype = "dashed", se = FALSE, linewidth = 0.75) +
+    scale_y_log10(breaks = log_breaks(10), labels = label_number(accuracy = 1, trim = TRUE)) +
+    scale_x_continuous(breaks = seq(yrs[1], yrs[2], by = 10)) +  # no hard limits
     scale_color_viridis_d(option = "turbo") +
-    labs(x = "Year",
-         y = "Adult Density (mean per stream-year)",
-         color = "Stream",
-         title = paste0("Adult Density — ", sp_name, " (", sp, ")")) +
+    labs(x = "Year", y = "Adult Density (mean per stream-year)", color = "Stream",
+         title = paste0("Adult Density — ", title_txt)) +
     theme_plot(legend = TRUE)
   
   print(p)
+  n_pages <- n_pages + 1L
 }
 
+# 3) Close device now (ensured by on.exit too)
 dev.off()
-cat("PDF saved to:", normalizePath(pdf_out), "\n")
-
 
 
