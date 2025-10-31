@@ -35,37 +35,23 @@ theme_plot <- function(legend = TRUE) {
   )
 }
 
-# use R Project GitHub/Great-Smoky-Mountains-Vital-Trends/Great-Smoky-Mountains-Vital-Trends.Rproj
 # ------------------------------------------------------------------
 # Define root paths (user-specific)
 # ------------------------------------------------------------------
-github_path <- "~/Documents/GitHub/Great-Smoky-Mountains-Vital-Trends"
 drive_path  <- "/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU"
 
+# ------------------------------------------------------------------
 # Datasets
-ncbi <- readxl::read_xlsx(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/NCBI_EPT/NCBI_taxa.xlsx"))
-str(ncbi) #species values for NCBI, WIBI was laregly unpopulated and not transcribed
+# ------------------------------------------------------------------
 
-inverts <- readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_locations.csv")) # locations added
-# Response varaibles = Count (number of individuals per taxon)
-# Categorical variables station code (sampling lcoation), LOC_NAME more descriptive but sometimes has multiple sampling codes
+# Main dataset
 
-#lacks lat lon, some duplicates
-inverts_original = readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export.csv")) #unmodified
+inverts <- readr::read_csv(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_with_coordinates.csv")) # locations added
 
-# Spatial layers 
-grsm_watershed = st_read(file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"))[2]
-grsm_streams = st_read(file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"))
-
-
-grsm_border <- sf::st_read(file.path(drive_path, "Maine/Spatial/BOUNDARY_LN/BOUNDARY_LN.shp"))[6] %>%
-  sf::st_transform(sf::st_crs(grsm_watershed))
-
-
-# ======================================================================
 # ===============================================================
-# Augment files
+# Add NCBI
 # ==============================================================
+ncbi <- readxl::read_xlsx(file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/NCBI_EPT/NCBI_taxa.xlsx"))
 
 # add genus to NCBI from species name
 ncbi$Genus <- stringr::word(ncbi$Species, 1, sep = " ")
@@ -80,46 +66,15 @@ ncbi_genus <- ncbi %>%
     genus_ncbi   = mean(NCBI, na.rm = TRUE),
     n_species    = n(),
     n_scored     = sum(!is.na(NCBI)),
-    .groups = "drop"
-  )
+    .groups = "drop")
 
-# Check original invert file for duplicates
-
-dups <- inverts_original %>%
-  mutate(Year =as.integer(format(EventDate, "%Y"))) %>%
-  group_by(across(everything())) %>% # group by every column, only duplicates will appear twice
-  filter(n() > 1) %>% #within each group, n() counts how many rows there are. Filter to more than 1
-  ungroup() %>%
-  arrange(across(everything())) #sets output so that duplicates are next to each other - note if not, its not obvious
-dups #492 rows of duplicates - ie, 246 rows have a duplicate
-
-dups %>%
-  count(Year, name = "n_duplicates") %>%
-  arrange(Year)
-
-
-# Inverts with locations
-
-# ----------------------------------------------------------------------
-# Whitespace cleanup
-# - Trim only character columns; leave numeric/integer columns unchanged
-# ----------------------------------------------------------------------
-inverts <- inverts %>%
-  mutate(across(where(is.character), str_squish))
-
-# ----------------------------------------------------------------------
-# Add helpful columns - Stream location, site, Genus, and year
-# ----------------------------------------------------------------------
-inverts$Location <- stringr::word(inverts$LOC_NAME, 1, sep = ",")
-inverts$Site     <- stringr::word(inverts$LOC_NAME, 2, sep = ",")
-inverts$Genus    <- stringr::word(inverts$Lab_Scientific_Name, 1, sep = " ")
-inverts$Year     <- as.numeric(stringr::word(inverts$Start_Date, 1, sep = "-"))
-
-# Add ncbi
+# Add NCBI to inverts
 inverts <- inverts %>%
   left_join(ncbi_genus %>% dplyr::select(Genus, genus_ncbi), by = "Genus")
+
+
 # ----------------------------------------------------------------------
-# ---------------- Table checks ---------------------------------------
+# ---------------- Sampling Checks ---------------------------------------
 # ----------------------------------------------------------------------
 # Sampling over the years - unique sample codes per month
 
@@ -142,25 +97,6 @@ time_table_samplecodes <- inverts %>%
 
 time_table_samplecodes %>% print(n = 27)
 
-# same but by location name
-time_table_location <- inverts %>%
-  filter(!is.na(Start_Date), !is.na(LOC_NAME)) %>%
-  transmute(
-    Year  = year(Start_Date),
-    Month = factor(month(Start_Date), levels = 1:12, labels = month.abb),
-    LOC_NAME
-  ) %>%
-distinct(Year, Month, LOC_NAME) %>%          # one count per unique sample code in a Year–Month
-  count(Year, Month, name = "n_loc_names") %>%  # totals per Year–Month
-  pivot_wider(
-    names_from  = Month,
-    values_from = n_loc_names,
-    values_fill = 0
-  ) %>%
-  arrange(Year) %>%
-  relocate(Year, all_of(month.abb))
-
-time_table_location%>% print(n = 27)
 
 # by site, month and year
 time_table2 <- inverts %>%
@@ -179,7 +115,7 @@ time_table2 <- inverts %>%
   ) %>%
   dplyr::arrange(LOC_NAME, Year) %>%
   dplyr::relocate(LOC_NAME, Year, dplyr::all_of(month.abb))
-time_table2
+
 time_table2%>% print(n = 36)
 
 # Multiple samples?
@@ -197,7 +133,10 @@ multisite_samples <- inverts %>%
 # 
 multisite_samples %>% print(n = 11)
 
+# ----------------------------------------------------------------------
 #Plot by month
+# ----------------------------------------------------------------------
+
 inverts %>%
   mutate(
     Stream = stringr::word(LOC_NAME, 1, sep = ","),
@@ -212,7 +151,7 @@ inverts %>%
   geom_bar(position = "stack") +
   scale_fill_viridis_d(option = "turbo") +
   labs(x = "Month", y = "Number of Samples", fill = "Stream",
-       title = "Overall Sampling Seasonality (≥5-Year Streams)") +
+       title = "Samples by Month (≥5-Year Streams)") +
   theme_plot() +
   theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5))
 
@@ -264,12 +203,16 @@ inverts %>%
   theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5))
 
 
+# ----------------------------------------------------------------------
+#------- Get EPT ------------------------------------------------------
+# ----------------------------------------------------------------------
+
+
+EPT_ORDERS <- c("Ephemeroptera","Plecoptera","Trichoptera")
 
 #---- Average in cases of multiple samples per site
 
 # first average for a given sample code (usually only one but not always)
-EPT_ORDERS <- c("Ephemeroptera","Plecoptera","Trichoptera")
-
 sample_level <- inverts %>%
   group_by(LOC_NAME, Year, Start_Date, Sample_Code) %>%
   summarise(
@@ -293,6 +236,7 @@ site_day <- sample_level %>%
     n_samples    = n(),  # QC: how many samples contributed
     .groups = "drop"
   )
+# note - outlier abundance (10x less) for Abrams creeks in 2014. Error?
 
 # Average across days per site
 site_year <- site_day %>%
@@ -317,18 +261,23 @@ inverts_stream <- site_year %>%
     EPT_rich_stream = mean(EPT_rich_site, na.rm = TRUE),
     EPT_abund_stream = mean(EPT_abund_site, na.rm = TRUE),
     ncbi_stream = mean(ncbi_site, na.rm = TRUE),
-    EPT_prop_abun = EPT_abund_stream/ abund_stream,
     n_samples    = n(),  # QC: how many samples contributed
     .groups = "drop"
   ) %>%
   group_by(Stream) %>%
-  mutate(n_years_sampled = n_distinct(Year)) %>%             # total years that stream was sampled
+  mutate(EPT_prop_abund = EPT_abund_stream/abund_stream,
+         n_years_sampled = n_distinct(Year), ) %>%
+# total years that stream was sampled
   ungroup()
+inverts_stream
 
-# check
+# Save
+#write_csv(inverts_stream , file.path(drive_path, "Maine/Data/Aquatics_Macroinverts/SummaryData/invert_stream_diversity_with_ncbi.csv"))
 
 
-# ------ Plots ------
+# ----------------------------------------------------------------------
+# ------ Richness, EPT, NCBI Plots ------
+# ----------------------------------------------------------------------
 
 # --- Richness
 p_richness <- ggplot(
@@ -370,6 +319,29 @@ p_richness <- ggplot(
     legend.position = "right") 
 p_richness
 
+
+# EPT Richness
+p_ept <- ggplot(
+  inverts_stream %>% 
+    filter(n_years_sampled >= 5, abund_stream > 0),
+  aes(x = Year, y = EPT_rich_stream , color = Stream, group = Stream)) +
+  geom_line() +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", linetype = "dashed", se = F, size = .5) +
+  scale_x_continuous(
+    breaks = seq(1985, 2025, by = 10),
+    limits = c(1984, 2025)) +
+  labs(x = "Year", y = "EPT", color = "Stream") +
+  theme_plot() +
+  ggtitle("EPT Richness") +
+  scale_color_viridis_d(option = "turbo") +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+    legend.position = "right") 
+p_ept
+
 # --- Abundance
 p_abundance <- ggplot(
   inverts_stream %>% 
@@ -387,11 +359,7 @@ p_abundance <- ggplot(
   scale_color_viridis_d(option = "turbo") +
   theme( panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
-    legend.position = "right") +
-  annotate("segment", x = 2017, xend = 2019.5, y = 3100, yend = 3100,
-           color = "black", linetype = "dashed") +
-  annotate("text", x = 2011.5, y = 3000, label = "Linear Fit", size = 5,
-           hjust = 0, vjust = 0, color = "black")
+    legend.position = "right") 
 p_abundance
 
 # with linear fit
@@ -408,7 +376,7 @@ p_abundance <- ggplot(
     limits = c(1984, 2025)) +
   labs(x = "Year", y = "Abundance per Stream", color = "Stream") +
   theme_plot() +
-  ggtitle("Stream Abundance") +
+  ggtitle("Macroinvertebrate Abundance") +
   scale_color_viridis_d(option = "turbo") +
   theme( panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
          panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
@@ -466,27 +434,6 @@ p_rel_ept <- ggplot(
          legend.position = "right") 
 p_rel_ept
 
-# EPT Richness
-p_ept <- ggplot(
-  inverts_stream %>% 
-    filter(n_years_sampled >= 5, abund_stream > 0),
-  aes(x = Year, y = EPT_rich_stream , color = Stream, group = Stream)) +
-  geom_line() +
-  geom_point(size = 2) +
-  geom_smooth(method = "lm", linetype = "dashed", se = F, size = .5) +
-  scale_x_continuous(
-    breaks = seq(1985, 2025, by = 10),
-    limits = c(1984, 2025)) +
-  labs(x = "Year", y = "EPT", color = "Stream") +
-  theme_plot() +
-  ggtitle("EPT Richness") +
-  scale_color_viridis_d(option = "turbo") +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
-    legend.position = "right") 
-p_ept
 # --- NCBI
 ref_lines <- data.frame(
   y     = c(4.18, 5.09, 5.91, 7.05),
@@ -675,12 +622,24 @@ p_ncbi_summer
 
 #------ Attach geometry for plotting
 
+# Spatial layers 
+grsm_watershed = st_read(file.path(drive_path, "Maine/Spatial/Watershed/GRSM_watershed.gpkg"))[2]
+grsm_streams = st_read(file.path(drive_path, "Maine/Spatial/Streams/GRSM_streams.gpkg"))
+grsm_border <- sf::st_read(file.path(drive_path, "Maine/Spatial/BOUNDARY_LN/BOUNDARY_LN.shp"))[6] 
+
 coords_sf <- inverts %>%
   st_as_sf(coords = c("LON","LAT"), crs = 4326, remove = FALSE) %>%
   mutate(stream = str_squish(str_remove(LOC_NAME, ",?\\s*Site\\s*\\w+$"))) %>%
   group_by(stream) %>%
   select(-Year) %>%
   slice_head(n = 1)  # one actual sampled point per stream
+
+target_crs <- 26917 # EPSG:26917, which is NAD83 / UTM zone 17N
+grsm_watershed <- st_transform(grsm_watershed, target_crs)
+grsm_border    <- st_transform(grsm_border, target_crs)
+grsm_streams   <- st_transform(grsm_streams, target_crs)
+coords_sf      <- st_transform(coords_sf, target_crs)
+
 
 inverts_stream_sf <- inverts_stream %>%
   left_join(coords_sf %>% dplyr::rename(Stream = stream), by = "Stream") %>%
@@ -722,12 +681,12 @@ watershed_labels <- st_point_on_surface(grsm_watershed)
 # 4) Plot: watersheds + border + filtered streams + locations
 ggplot() +
   geom_sf(data = grsm_border,  fill = NA, color = "gray50", linewidth = 1) +
-  geom_sf(data = grsm_watershed,    fill = NA, color = "blue", linewidth = 0.15) +
-  geom_sf(data = streams_used, aes(color = Stream), linewidth = .75, alpha = 0.9) +
+  geom_sf(data = grsm_watershed, fill = NA, color = "blue", linewidth = .75) +
+  geom_sf(data = streams_used, aes(color = Stream), linewidth = .5, alpha = 0.9) +
   geom_sf_text(data = stream_labels, aes(label = Stream, color = Stream),
                size = 3, check_overlap = TRUE) +
   geom_sf(data = sites_pts, aes(color = stream), size = 4) +
-  geom_sf_label(data = grsm_watershed, aes(label = name),fill = "white", fontface = "bold", sieze = 3, color = "blue",label.size = 0,
+  geom_sf_label(data = grsm_watershed, aes(label = name),fill = "white", fontface = "bold", size = 3, color = "blue",label.size = 0,
                 label.r = unit(0.15, "lines"), size = 3) +
   scale_color_viridis_d(option = "turbo", guide = "none") +
 
@@ -764,11 +723,11 @@ inverts_stream <- inverts_stream %>%
     log_richness       = log(rich_stream),
     log_abundance      = log(abund_stream),
     log_EPT_richness   = log(EPT_rich_stream),
-    log_EPT_abundance  = log(EPT_abund_stream)
-  ) %>%
+    log_EPT_abundance  = log(EPT_abund_stream),
+    log_rel_EPT_abundance = log(EPT_abund_stream/abund_stream)) %>%
   mutate(
     across(
-      c(log_richness, log_abundance, log_EPT_richness, log_EPT_abundance),
+      c(log_richness, log_abundance, log_EPT_richness, log_EPT_abundance, log_rel_EPT_abundance ),
       ~ ifelse(is.finite(.x), .x, NA_real_)
     )
   )
@@ -779,6 +738,7 @@ responses <- c(
   "log_abundance",
   "log_EPT_richness",
   "log_EPT_abundance",
+  "log_rel_EPT_abundance",
   "ncbi_stream"   # left unlogged
 )
 
@@ -786,8 +746,9 @@ responses <- c(
 resp_labels <- c(
   log_richness      = "Invertebrate Richness Trends",
   log_abundance     = "Invertebrate Abundance  Trends",
-  log_EPT_richness  = "EPT Richness  Trends",
-  log_EPT_abundance = "EPT Abundance  Trends",
+  log_EPT_richness  = "EPT Richness Trends",
+  log_EPT_abundance = "EPT Abundance Trends",
+  log_rel_EPT_abundance = "EPT Relative Abundance Trends",
   ncbi_stream       = "NCBI Index Trends"
 )
 
