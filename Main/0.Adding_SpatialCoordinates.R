@@ -13,6 +13,8 @@ general_path <- "/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.c
 # Helper to shorten file.path calls
 gp <- function(...) file.path(general_path, ...)
 
+# Consider using R Project GitHub/Great-Smoky-Mountains-Vital-Trends/Great-Smoky-Mountains-Vital-Trends.Rproj
+
 #==============================================================
 # 2. Load & summarize individual datasets
 #==============================================================
@@ -44,7 +46,7 @@ three_pass_data <- read_xlsx(
   distinct(.) # exclude duplicated rows
 
 # Write three pass data with location, watershed and stream name
-write_csv(three_pass_data, gp("Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_loc.csv"))
+write_csv(three_pass_data, gp("Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_coordinates.csv"))
 
 #------- Data Variable description
 # Location Categories - Stream and LOC_NAME or Code, Watershed and Streamname
@@ -93,16 +95,55 @@ invert_loc_codes <- read_csv(gp("Data/Aquatics_Macroinverts/Documents/Locations.
   distinct()
 
 # Join location to original data and remove duplicate rows
-inverts <- read_csv(gp("Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export.csv")) %>%
+inverts_original <- read_csv(gp("Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export.csv")) 
+
+# Response variables = Count (number of individuals per taxon)
+# Categorical variables station code (sampling lcoation), LOC_NAME more descriptive but sometimes has multiple sampling codes
+
+# ----------------------------------------------------------------------
+# Add spatial coordinates and clean up
+# ----------------------------------------------------------------------
+
+inverts = inverts_original %>%
   left_join(invert_loc_codes, by = "LOC_NAME")  %>%
-  distinct(.) 
+  distinct(.)  # remove duplicate rows
+
+ 
+# Whitespace cleanup: Trim only character columns; leave numeric/integer columns unchanged
+inverts <- inverts %>%
+  mutate(across(where(is.character), str_squish))
+
+# Add helpful columns - Stream location, site, Genus, and year
+inverts$Location <- stringr::word(inverts$LOC_NAME, 1, sep = ",")
+inverts$Site     <- stringr::word(inverts$LOC_NAME, 2, sep = ",")
+inverts$Genus    <- stringr::word(inverts$Lab_Scientific_Name, 1, sep = " ")
+inverts$Year     <- as.integer(stringr::word(inverts$Start_Date, 1, sep = "-"))
 
 
+# ----------------------------------------------------------------------
+# compare to original data lacks lat lon, some duplicates
+nrow(inverts_original)
+nrow(inverts)
+
+# show duplicates
+dups <- inverts_original %>%
+  mutate(Year =as.integer(format(EventDate, "%Y"))) %>%
+  group_by(across(everything())) %>% # group by every column, only duplicates will appear twice
+  filter(n() > 1) %>% #within each group, n() counts how many rows there are. Filter to more than 1
+  ungroup() %>%
+  arrange(across(everything())) #sets output so that duplicates are next to each other - note if not, its not obvious
+dups #492 rows of duplicates - ie, 246 rows have a duplicate
+
+dups %>%
+  count(Year, name = "n_duplicates") %>%
+  arrange(Year)
 # Response variable = Count (number of individuals per taxon)
 # Categorical variables sampling station code (sampling location), LOC_NAME more descriptive but sometimes has multiple sampling codes
 # Sample_Code = station code plus year
+
+# ----------------------------------------------------------------------
 #save data file with added locations
-write_csv(inverts, gp("Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_with_locations.csv"))
+write_csv(inverts, gp("Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_with_coordinates.csv"))
 
 #--------------------------------------------------------------
 # 2.3  VEGETATION (trees + seedlings)
@@ -126,6 +167,7 @@ wooody_stems_loc <- read_csv(gp("Data/Forest_Health/Woody_Stems.csv")) %>%
 veg_comm_struct_loc <- read_csv(gp("Data/Forest_Health/veg_comm_struct.csv")) %>%
   left_join(forest_loc, by = "LOC_NAME") %>%
   mutate(Year = year(Event_Date))
+str(veg_comm_struct_loc)
 
 write_csv(trees_loc, gp("Data/Forest_Health/Trees_with_coordinates.csv"))
 write_csv(seedlings_loc, gp("Data/Forest_Health/Seedlings_with_coordinates.csv"))
