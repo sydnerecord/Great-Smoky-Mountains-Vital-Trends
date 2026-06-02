@@ -1,3 +1,4 @@
+#1.  Setup Workspace -----
 # Add locations and check for duplicates
 library(sf)
 library(terra)
@@ -7,7 +8,7 @@ library(lubridate)
 library(janitor)
 library(stringr)
 
-#--- Base path - update to your computer ---
+# Base path - update to your computer 
 general_path <- "/Users/jgradym/Library/CloudStorage/GoogleDrive-jgradym@gmail.com/Shared drives/GRSM_CESU/Maine"  
 
 # Helper to shorten file.path calls
@@ -15,13 +16,10 @@ gp <- function(...) file.path(general_path, ...)
 
 # Consider using R Project GitHub/Great-Smoky-Mountains-Vital-Trends/Great-Smoky-Mountains-Vital-Trends.Rproj
 
-#==============================================================
-# 2. Load & summarize individual datasets
-#==============================================================
 
-#--------------------------------------------------------------
-# 2.1  FISH (Three-pass data)
-#--------------------------------------------------------------
+# 2. Load & summarize individual datasets -------
+## 2.1  FISH (Three-pass data) -------
+
 
 # Add Location data
 
@@ -48,7 +46,7 @@ three_pass_data <- read_xlsx(
 # Write three pass data with location, watershed and stream name
 write_csv(three_pass_data, gp("Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_coordinates.csv"))
 
-#------- Data Variable description
+#   Data Variable description
 # Location Categories - Stream and LOC_NAME or Code, Watershed and Streamname
 # Response variables :
 #YOYpop – Count of young-of-year individuals (juveniles) captured per sample.
@@ -79,9 +77,9 @@ three_pass_annual_average <- three_pass_data %>%
 
 
 
-#--------------------------------------------------------------
-# 2.2  MACROINVERTEBRATES
-#--------------------------------------------------------------
+
+## 2.2  MACROINVERTEBRATES ------
+
 
 # download and prepare location file for a join to population data 
 
@@ -100,9 +98,9 @@ inverts_original <- read_csv(gp("Data/Aquatics_Macroinverts/SummaryData/Specimen
 # Response variables = Count (number of individuals per taxon)
 # Categorical variables station code (sampling lcoation), LOC_NAME more descriptive but sometimes has multiple sampling codes
 
-# ----------------------------------------------------------------------
-# Add spatial coordinates and clean up
-# ----------------------------------------------------------------------
+
+# Add spatial coordinates and clean up -------
+
 
 inverts = inverts_original %>%
   left_join(invert_loc_codes, by = "LOC_NAME")  %>%
@@ -120,7 +118,6 @@ inverts$Genus    <- stringr::word(inverts$Lab_Scientific_Name, 1, sep = " ")
 inverts$Year     <- as.integer(stringr::word(inverts$Start_Date, 1, sep = "-"))
 
 
-# ----------------------------------------------------------------------
 # compare to original data lacks lat lon, some duplicates
 nrow(inverts_original)
 nrow(inverts)
@@ -141,13 +138,12 @@ dups %>%
 # Categorical variables sampling station code (sampling location), LOC_NAME more descriptive but sometimes has multiple sampling codes
 # Sample_Code = station code plus year
 
-# ----------------------------------------------------------------------
 #save data file with added locations
 write_csv(inverts, gp("Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_with_coordinates.csv"))
 
-#--------------------------------------------------------------
-# 2.3  VEGETATION (trees + seedlings)
-#--------------------------------------------------------------
+###
+## 2.3  VEGETATION (trees + seedlings) ----------
+###
 forest_loc <- read_csv(gp("Data/Forest_Health/Locations.csv")) %>%
   select(LOC_NAME, VS_WATERSHED, LAT, LON) #note: Watershed names differ from the official USGS HUC10 (watershed) hydrologic unit names
 
@@ -174,9 +170,9 @@ write_csv(seedlings_loc, gp("Data/Forest_Health/Seedlings_with_coordinates.csv")
 write_csv(wooody_stems_loc, gp("Data/Forest_Health/Woody_Stems_with_coordinates.csv"))
 write_csv(veg_comm_struct_loc, gp("Data/Forest_Health/veg_comm_struct_with_coordinates.csv"))
 
-#--------------------------------------------------------------
-# 2.4  SOILS
-#--------------------------------------------------------------
+###
+## 2.4  SOILS ---------
+###
 soil_location = read_csv(gp("Data/Soil_Quality/Soils.csv"))
 
 soils <- read_csv(gp("Data/Soil_Quality/Soils.csv")) %>%
