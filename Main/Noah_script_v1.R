@@ -2,6 +2,65 @@ library(sf)
 
 setwd("G:/Shared drives/GRSM_CESU")
 
+##
+# Water Quality Sites ----
+##
+NWQ <- read.csv('data/NationalWaterQualityDownload_resultphyschem.csv')
+names(NWQ)
+results <- NWQ[ ,c('MethodSpeciationName','CharacteristicName',
+                'ResultSampleFractionText','ResultMeasureValue',
+                'ResultMeasure/MeasureUnitCode')]
+names(NWQ)
+
+## compare Water Quality sites to Vital Trends Sites ----
+    lat <- NWQ[,grep('Latitude',names(NWQ))]
+    lon <- NWQ[,grep('Longitude',names(NWQ))]
+    ID <- NWQ[,'MonitoringLocationIdentifier']
+    name <- NWQ[,'MonitoringLocationName']
+    
+    water.sites <- data.frame(ID, name, lat, lon)
+    U.water.sites <- unique(water.sites)
+    dim(water.sites)
+    plot(U.water.sites[,c('lon','lat')], cex=1.5, col='gray', pch=19)
+    
+    #read in the vital trend datasets with coordinates
+    soil <- read.csv('Maine/Data/Soil_Quality/Soils_with_coordinates.csv')
+    fish3pass <- read.csv('Maine/Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_coordinates.csv')
+    veg <- read.csv('Maine/Data/Forest_Health/Locations.csv')
+    invert <- read.csv('Maine/Data/Aquatics_Macroinverts/SummaryData/Specimen_Data_Export_with_coordinates.csv')
+    
+    #plot them
+    points(soil[,c('LON','LAT')], col='brown', pch=19)
+    points(fish3pass[,c('LON', 'LAT')],col='red', pch=3)
+    points(veg[,c('LON','LAT')],col='blue',pch=2)
+    points(invert[,c('LON','LAT')],col='green',pch=4)
+    
+    #soil and veg are the same, except soil is missing 32 veg points
+    sum(!(unique(soil[,'LOC_NAME']) %in% unique(veg[,'LOC_NAME'])))
+    sum(!(unique(veg[,'LOC_NAME']) %in% unique(soil[,'LOC_NAME'])))
+    
+    length(unique(veg[,'LOC_NAME']))
+    length(unique(fish3pass[,'LOC_NAME']))
+    length(unique(soil[,'LOC_NAME']))
+    
+    fish.sites <- unique(fish3pass[,c('LOC_NAME','LON','LAT')])
+    fish.sites <- na.omit(fish.sites)
+    veg.sites <- unique(veg[,c('LOC_NAME','LON','LAT')])
+    invert.sites <- unique(invert[,c('LOC_NAME','LON','LAT')])
+    
+    # Project to UTM zone 17N (crs = 32617
+    points_sf_wgs84 <- st_as_sf(fish.sites, coords = c("LON", "LAT"), crs = 4326)
+    fish.projected <- st_transform(points_sf_wgs84, crs = 32617)
+    points_sf_wgs84 <- st_as_sf(veg.sites, coords = c("LON", "LAT"), crs = 4326)
+    veg.projected <- st_transform(points_sf_wgs84, crs = 32617)
+    points_sf_wgs84 <- st_as_sf(invert.sites, coords = c("LON", "LAT"), crs = 4326)
+    invert.projected <- st_transform(points_sf_wgs84, crs = 32617)
+    
+    
+    ##
+# Co-Locating sites across Datasets ----
+##
+
 #read in the datasets with coordinates
 soil <- read.csv('Maine/Data/Soil_Quality/Soils_with_coordinates.csv')
 fish3pass <- read.csv('Maine/Data/Aquatics_Fish/Three_Pass/Summary_data/GRSM_Fish_3-Pass_Summary_with_coordinates.csv')
@@ -79,8 +138,9 @@ head(invert.mat)
 
 write.csv(fish.mat,na = '',file='fish_co-locations_v1.csv', row.names = FALSE)
 write.csv(invert.mat,na = '',file='invert_co-locations_v1.csv', row.names = FALSE)
-
-###JUNK -----
+##
+#JUNK -----
+##
 head(fish.mat)
 
 for(i in 1:dim(fish.mat)[1]){
