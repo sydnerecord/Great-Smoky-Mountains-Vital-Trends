@@ -1,4 +1,4 @@
-#Thia script reads PRISM monthly temperature and precipitation data from 
+#This script reads PRISM monthly temperature and precipitation data from 
 #the prism package, and converts the bil files to tif
 
 # Read In packages --------------------------------------------------------
@@ -11,27 +11,20 @@ library(sf)
 ##############################
 # PRISM precipitation data 
 ##############################
-#Automatically make iDigBio folder for current directory 
+#Automatically make GRSM data folder for current directory
+setwd('G:/Shared drives/GRSM_CESU/Data/Climate')
 #Define a bil directory path
-ppt.dir <- file.path(getwd(), "PRISM/ppt")
-# Check if the folder exists — if not, create it
-if (!dir.exists(ppt.dir)) {
-  dir.create(ppt.dir)
-  message("Created PRISM precipitation directory at: ", ppt.dir)
-} else {
-  message("Using existing PRISM precipitation directory at: ", ppt.dir)
-}
-bil = file.path(ppt.dir, "bil") #becasue I know I don't want this file format so I will stow it in its own folder 
+ppt.dir <- file.path(getwd(), "PRISM/ppt") # Note that you will need to have made these folders for downloading the data into
+bil = file.path(ppt.dir, "bil") #because we ultimately don't want this file format so I will stow it in its own folder 
 
 #sets directory to save climate data
 prism_set_dl_dir(bil)
 #Checks that directory is valid
 prism_check_dl_dir() 
 
-#Pulling monthly PRISM data - for more options see https://cran.r-project.org/web/packages/prism/prism.pdf
-get_prism_monthlys(type = "ppt", #precipitation 
+#Pulling annual PRISM data - for more options see https://cran.r-project.org/web/packages/prism/prism.pdf
+get_prism_annual(type = "ppt", #precipitation 
                    years = c(1985:2024), #years
-                   mon = 03:05, #spring months 
                    keepZip = TRUE) 
 
 #Tells you folder names that data is in
